@@ -1,5 +1,5 @@
 # CJDNS Peer Manager
-
+##PLACEHOLDER-TOBEUPDATED!##
 An interactive, portable tool for managing CJDNS peers. Automatically detects your cjdns installation, discovers new peers from multiple sources, tests connectivity, and safely adds peers to your configuration.
 
 ## Features
