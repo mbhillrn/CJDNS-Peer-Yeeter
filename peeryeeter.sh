@@ -1130,9 +1130,9 @@ remove_peers_menu() {
         if [ "$already_shown" = false ]; then
             index=$((index + 1))
             peer_addresses+=("$config_addr")
-            printf "%3d) ${GRAY}○${NC} %-40s Q:%-5s Est:%-3d Unr:%-3d (Not yet checked)\n" \
+            printf "%3d) ${GRAY}○${NC} %-40s Q:%-5s Est:%-3d Unr:%-3d ${GRAY}(Awaiting first check)${NC}\n" \
                 "$index" "$config_addr" "N/A" "0" "0"
-            peer_displays+=("$config_addr (UNCHECKED)")
+            peer_displays+=("$config_addr (AWAITING CHECK)")
         fi
     done
 
@@ -1283,24 +1283,48 @@ view_peer_status() {
     if ask_yes_no "Show detailed list with quality scores and timestamps?"; then
         print_subheader "Peer Details"
 
-        # Get all peers with full details from database
-        local all_peers=$(get_all_peers_by_quality)
+        # Get all peers from config (IPv4 and IPv6)
+        declare -a all_config_peers
+        # IPv4 peers
+        while IFS= read -r addr; do
+            [ -n "$addr" ] && all_config_peers+=("$addr")
+        done < <(jq -r '.interfaces.UDPInterface[0].connectTo // {} | keys[]' "$CJDNS_CONFIG" 2>/dev/null)
 
-        # Display each peer
+        # IPv6 peers
+        while IFS= read -r addr; do
+            [ -n "$addr" ] && all_config_peers+=("$addr")
+        done < <(jq -r '.interfaces.UDPInterface[1].connectTo // {} | keys[]' "$CJDNS_CONFIG" 2>/dev/null)
+
+        # Get all peers with full details from database
+        local all_db_peers=$(get_all_peers_by_quality)
+
+        # Create associative array for quick lookup
+        declare -A db_peers
         while IFS='|' read -r address state quality est_count unr_count first_seen last_change consecutive; do
             [ -z "$address" ] && continue
+            db_peers["$address"]="$state|$quality|$est_count|$unr_count|$last_change|$consecutive"
+        done <<< "$all_db_peers"
 
-            local quality_display=$(printf "%.0f%%" "$quality")
-            local time_in_state=$(time_since "$last_change")
+        # Display each peer from config
+        for config_addr in "${all_config_peers[@]}"; do
+            if [ -n "${db_peers[$config_addr]}" ]; then
+                # Peer is in database - show full info
+                IFS='|' read -r state quality est_count unr_count last_change consecutive <<< "${db_peers[$config_addr]}"
+                local quality_display=$(printf "%.0f%%" "$quality")
+                local time_in_state=$(time_since "$last_change")
 
-            if [ "$state" = "ESTABLISHED" ]; then
-                print_success "$state: $address (Quality: $quality_display, Established $time_in_state)"
-            elif [ "$state" = "UNRESPONSIVE" ]; then
-                print_error "$state: $address (Quality: $quality_display, Unresponsive $time_in_state, Checked $consecutive times)"
+                if [ "$state" = "ESTABLISHED" ]; then
+                    print_success "$state: $config_addr (Quality: $quality_display, Established $time_in_state)"
+                elif [ "$state" = "UNRESPONSIVE" ]; then
+                    print_error "$state: $config_addr (Quality: $quality_display, Unresponsive $time_in_state, Checked $consecutive times)"
+                else
+                    print_warning "$state: $config_addr (Quality: $quality_display, In state $time_in_state)"
+                fi
             else
-                print_warning "$state: $address (Quality: $quality_display, In state $time_in_state)"
+                # Peer not in database yet - show as awaiting check
+                echo -e "${GRAY}○ AWAITING CHECK: $config_addr (Not yet tested - will be checked on next service restart)${NC}"
             fi
-        done <<< "$all_peers"
+        done
     fi
 
     echo

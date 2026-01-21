@@ -428,7 +428,8 @@ config_editor_menu() {
                 if ! command -v fx &>/dev/null; then
                     print_error "fx is not installed"
                     echo
-                    print_info "Install fx with: sudo apt install fx"
+                    print_info "Install fx with: sudo snap install fx"
+                    print_info "Or during initialization, select yes when prompted"
                     sleep 2
                     continue
                 fi
@@ -456,8 +457,13 @@ config_editor_menu() {
                 echo
                 read -p "Press Enter to open fx..."
 
-                # Open fx
-                fx "$CJDNS_CONFIG"
+                # Open fx as the actual user (drop sudo privileges for terminal UI)
+                if [ -n "$SUDO_USER" ]; then
+                    # Run fx as the original user to avoid permission issues
+                    sudo -u "$SUDO_USER" fx "$CJDNS_CONFIG"
+                else
+                    fx "$CJDNS_CONFIG"
+                fi
 
                 # Validate after editing
                 if validate_config "$CJDNS_CONFIG"; then

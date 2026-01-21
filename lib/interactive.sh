@@ -76,23 +76,33 @@ interactive_peer_management() {
         done
 
         if [ "$already_added" = false ]; then
-            peer_options+=("○ $config_addr | Not yet checked")
+            peer_options+=("○ $config_addr | Awaiting first check")
             peer_addresses+=("$config_addr")
         fi
     done
+
+    # Check if we have any options
+    if [ ${#peer_options[@]} -eq 0 ]; then
+        print_error "No peers found to display"
+        echo
+        read -p "Press Enter to continue..."
+        return
+    fi
 
     # Use gum to select peers
     print_success "Found ${#peer_addresses[@]} peers in config"
     echo
     print_info "Use arrow keys to navigate, Space to select/deselect, Enter to confirm"
-    print_info "Or press 'a' to select all unresponsive peers"
+    print_info "Press ESC to cancel"
     echo
 
     local selected
-    selected=$(gum choose --no-limit --header "Select peers to REMOVE from config:" "${peer_options[@]}" 2>/dev/null)
+    # Add explicit options and handle cancellation
+    selected=$(gum choose --no-limit --height 20 "${peer_options[@]}" 2>&1)
+    local gum_exit=$?
 
-    if [ -z "$selected" ]; then
-        print_info "No peers selected"
+    if [ $gum_exit -ne 0 ] || [ -z "$selected" ]; then
+        print_info "Cancelled or no peers selected"
         echo
         read -p "Press Enter to continue..."
         return
@@ -205,7 +215,7 @@ interactive_file_deletion() {
         database)
             title="Manage Database Backups"
             file_pattern="peer_tracking_backup_*.db"
-            search_dir="$BACKUP_DIR"
+            search_dir="$BACKUP_DIR/database_backups"
             ;;
         *)
             print_error "Invalid file type: $file_type"
@@ -237,16 +247,19 @@ interactive_file_deletion() {
         file_options+=("$filename | $size | $date")
     done
 
-    print_info "Found ${#files[@]} file(s)"
+    print_success "Found ${#files[@]} file(s)"
     echo
     print_info "Use arrow keys to navigate, Space to select/deselect, Enter to confirm"
+    print_info "Press ESC to cancel"
     echo
 
     local selected
-    selected=$(gum choose --no-limit --header "Select files to DELETE:" "${file_options[@]}" 2>/dev/null)
+    selected=$(gum choose --no-limit --height 20 "${file_options[@]}" 2>&1)
+    local gum_exit=$?
 
-    if [ -z "$selected" ]; then
-        print_info "No files selected"
+    # Check if user cancelled (ESC key) or no selection
+    if [ $gum_exit -ne 0 ] || [ -z "$selected" ]; then
+        print_info "Cancelled or no files selected"
         echo
         read -p "Press Enter to continue..."
         return
@@ -309,13 +322,21 @@ interactive_settings_editor() {
         echo "  • Service: ${CJDNS_SERVICE:-Disabled}"
         echo "  • Backup Directory: $BACKUP_DIR"
         echo
+        print_info "Use arrow keys to navigate, Enter to select, ESC to cancel"
+        echo
 
         local choice
-        choice=$(gum choose --header "Select setting to modify:" \
+        choice=$(gum choose --height 10 \
             "Change Config File Location" \
             "Change Service Name" \
             "Change Backup Directory (with migration)" \
-            "Back to Main Menu" 2>/dev/null)
+            "Back to Main Menu" 2>&1)
+        local gum_exit=$?
+
+        # Check if user cancelled (ESC key)
+        if [ $gum_exit -ne 0 ] || [ -z "$choice" ]; then
+            return
+        fi
 
         case "$choice" in
             "Change Config File Location")
@@ -327,7 +348,7 @@ interactive_settings_editor() {
             "Change Backup Directory (with migration)")
                 change_backup_directory
                 ;;
-            "Back to Main Menu"|"")
+            "Back to Main Menu")
                 return
                 ;;
         esac
@@ -527,15 +548,33 @@ interactive_peer_sources() {
             index=$((index + 1))
         done <<< "$sources_json"
 
-        print_info "Current peer sources:"
+        print_info "Current peer sources (${#source_options[@]} total):"
+        echo
+
+        # Show current sources
+        if [ ${#source_options[@]} -gt 0 ]; then
+            for opt in "${source_options[@]}"; do
+                echo "  $opt"
+            done
+        else
+            print_warning "No peer sources configured yet"
+        fi
+        echo
+        print_info "Use arrow keys to navigate, Enter to select, ESC to cancel"
         echo
 
         local action
-        action=$(gum choose --header "Select action:" \
+        action=$(gum choose --height 10 \
             "Toggle Source On/Off" \
             "Add New Source" \
             "Remove Source" \
-            "Back to Main Menu" 2>/dev/null)
+            "Back to Main Menu" 2>&1)
+        local gum_exit=$?
+
+        # Check if user cancelled (ESC key)
+        if [ $gum_exit -ne 0 ] || [ -z "$action" ]; then
+            return
+        fi
 
         case "$action" in
             "Toggle Source On/Off")
@@ -547,7 +586,7 @@ interactive_peer_sources() {
             "Remove Source")
                 remove_peer_source "${source_options[@]}"
                 ;;
-            "Back to Main Menu"|"")
+            "Back to Main Menu")
                 return
                 ;;
         esac
@@ -560,14 +599,22 @@ toggle_peer_source() {
 
     if [ ${#sources[@]} -eq 0 ]; then
         print_warning "No sources available"
-        sleep 1
+        sleep 2
         return
     fi
 
-    local selected
-    selected=$(gum choose --header "Select source to toggle:" "${sources[@]}" 2>/dev/null)
+    clear
+    print_ascii_header
+    print_subheader "Toggle Source On/Off"
+    echo
+    print_info "Use arrow keys to navigate, Enter to select, ESC to cancel"
+    echo
 
-    if [ -z "$selected" ]; then
+    local selected
+    selected=$(gum choose --height 15 "${sources[@]}" 2>&1)
+    local gum_exit=$?
+
+    if [ $gum_exit -ne 0 ] || [ -z "$selected" ]; then
         return
     fi
 
@@ -582,6 +629,7 @@ toggle_peer_source() {
     jq ".sources |= map(if .name==\"$name\" then .enabled=$new_state else . end)" "$PEER_SOURCES" > "$PEER_SOURCES.tmp"
     mv "$PEER_SOURCES.tmp" "$PEER_SOURCES"
 
+    echo
     print_success "Toggled $name to: $new_state"
     sleep 1
 }
@@ -592,15 +640,23 @@ add_peer_source() {
     print_ascii_header
     print_subheader "Add New Peer Source"
     echo
+    print_info "Press Ctrl+C to cancel at any time"
+    echo
 
     local name
     name=$(gum input --placeholder "Source name (e.g., my-peers)" --width 80)
     [ -z "$name" ] && return
 
-    local type
-    type=$(gum choose --header "Source type:" "github" "json")
-    [ -z "$type" ] && return
+    echo
+    print_info "Use arrow keys to navigate, Enter to select, ESC to cancel"
+    echo
 
+    local type
+    type=$(gum choose --height 6 "github" "json" 2>&1)
+    local gum_exit=$?
+    [ $gum_exit -ne 0 ] || [ -z "$type" ] && return
+
+    echo
     local url
     if [ "$type" = "github" ]; then
         url=$(gum input --placeholder "GitHub repo URL (e.g., https://github.com/user/repo.git)" --width 80)
@@ -613,6 +669,7 @@ add_peer_source() {
     jq ".sources += [{\"name\": \"$name\", \"type\": \"$type\", \"url\": \"$url\", \"enabled\": true}]" "$PEER_SOURCES" > "$PEER_SOURCES.tmp"
     mv "$PEER_SOURCES.tmp" "$PEER_SOURCES"
 
+    echo
     print_success "Added source: $name"
     sleep 1
 }
@@ -623,22 +680,34 @@ remove_peer_source() {
 
     if [ ${#sources[@]} -eq 0 ]; then
         print_warning "No sources available"
-        sleep 1
+        sleep 2
         return
     fi
 
-    local selected
-    selected=$(gum choose --header "Select source to REMOVE:" "${sources[@]}" 2>/dev/null)
+    clear
+    print_ascii_header
+    print_subheader "Remove Peer Source"
+    echo
+    print_warning "WARNING: This will permanently remove the source from your configuration"
+    echo
+    print_info "Use arrow keys to navigate, Enter to select, ESC to cancel"
+    echo
 
-    if [ -z "$selected" ]; then
+    local selected
+    selected=$(gum choose --height 15 "${sources[@]}" 2>&1)
+    local gum_exit=$?
+
+    if [ $gum_exit -ne 0 ] || [ -z "$selected" ]; then
         return
     fi
 
     local name=$(echo "$selected" | sed -E 's/^[✓✗] ([^ ]+) .*/\1/')
 
+    echo
     if gum confirm "Remove source: $name?"; then
         jq ".sources |= map(select(.name!=\"$name\"))" "$PEER_SOURCES" > "$PEER_SOURCES.tmp"
         mv "$PEER_SOURCES.tmp" "$PEER_SOURCES"
+        echo
         print_success "Removed source: $name"
         sleep 1
     fi

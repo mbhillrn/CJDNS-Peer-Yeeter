@@ -99,7 +99,39 @@ check_fx() {
     fi
 }
 
-# Install fx via precompiled binary
+# Check if snap is installed
+check_snap() {
+    if command -v snap &>/dev/null; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Install snapd
+install_snapd() {
+    print_info "Installing snapd (required for fx)..."
+    echo
+
+    if [ "$EUID" -ne 0 ]; then
+        print_error "This installation requires root privileges"
+        return 1
+    fi
+
+    print_working "Installing snapd..."
+    if apt update >/dev/null 2>&1 && apt install -y snapd >/dev/null 2>&1; then
+        print_complete "snapd installed successfully" "success"
+        echo
+        print_warning "You may need to log out and back in for snap to work properly"
+        echo
+        return 0
+    else
+        print_complete "Failed to install snapd" "failed"
+        return 1
+    fi
+}
+
+# Install fx via snap
 install_fx() {
     print_info "Installing fx (interactive JSON viewer/editor)..."
     echo
@@ -109,53 +141,32 @@ install_fx() {
         return 1
     fi
 
-    local temp_dir=$(mktemp -d)
-    cd "$temp_dir" || return 1
-
-    print_working "Downloading fx binary..."
-
-    # Detect architecture
-    local arch=$(uname -m)
-    local fx_binary
-
-    case "$arch" in
-        x86_64)
-            fx_binary="fx_linux_amd64"
-            ;;
-        aarch64|arm64)
-            fx_binary="fx_linux_arm64"
-            ;;
-        *)
-            print_complete "Unsupported architecture: $arch" "failed"
-            cd - >/dev/null
-            rm -rf "$temp_dir"
+    # Check if snap is installed
+    if ! check_snap; then
+        print_warning "snap is not installed (required for fx)"
+        echo
+        if ask_yes_no "Install snapd first?"; then
+            if ! install_snapd; then
+                print_error "Cannot install fx without snapd"
+                return 1
+            fi
+        else
+            print_error "Cannot install fx without snapd"
             return 1
-            ;;
-    esac
-
-    # Download latest fx release
-    if ! wget -q "https://github.com/antonmedv/fx/releases/latest/download/$fx_binary" -O fx 2>/dev/null; then
-        print_complete "Failed to download fx" "failed"
-        cd - >/dev/null
-        rm -rf "$temp_dir"
-        return 1
+        fi
     fi
-    print_complete "Downloaded fx binary" "success"
 
-    # Install to /usr/local/bin
-    print_working "Installing fx to /usr/local/bin..."
-    chmod +x fx
-    if ! mv fx /usr/local/bin/fx 2>/dev/null; then
+    # Install fx via snap
+    print_working "Installing fx via snap..."
+    if snap install fx 2>/dev/null; then
+        print_complete "fx installed successfully!" "success"
+        return 0
+    else
         print_complete "Failed to install fx" "failed"
-        cd - >/dev/null
-        rm -rf "$temp_dir"
+        echo
+        print_info "You can try manually: sudo snap install fx"
         return 1
     fi
-    print_complete "fx installed successfully!" "success"
-
-    cd - >/dev/null
-    rm -rf "$temp_dir"
-    return 0
 }
 
 # Check all prerequisites
