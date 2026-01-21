@@ -5,9 +5,9 @@
 interactive_peer_management() {
     clear
     print_ascii_header
-    print_header "Interactive Peer Management"
+    print_header "View Status & Remove Peers"
 
-    print_info "Loading peer data from config and cjdns..."
+    print_bold "Loading peer data from config and cjdns..."
     echo
 
     # Get current peer states
@@ -116,6 +116,15 @@ interactive_peer_management() {
         selected_addresses+=("$addr")
     done <<< "$selected"
 
+    # Check if any peers were selected
+    if [ ${#selected_addresses[@]:-0} -eq 0 ]; then
+        echo
+        print_error "No peers matched selection"
+        echo
+        read -p "Press Enter to continue..."
+        return
+    fi
+
     # Show confirmation
     echo
     print_warning "The following ${#selected_addresses[@]} peer(s) will be PERMANENTLY REMOVED:"
@@ -131,20 +140,17 @@ interactive_peer_management() {
         return
     fi
 
-    # Backup
+    # Auto-backup before removal
     echo
-    if gum confirm "Create backup before removing?"; then
-        local backup
-        if backup=$(backup_config "$CJDNS_CONFIG"); then
-            print_success "Backup created: $backup"
-        else
-            print_error "Failed to create backup"
-            if ! gum confirm "Continue anyway?"; then
-                return
-            fi
-        fi
+    print_working "Creating automatic backup before removal..."
+    local backup
+    if backup=$(backup_config "$CJDNS_CONFIG"); then
+        print_success "Backup created: $backup"
     else
-        print_warning "Proceeding without backup!"
+        print_error "Failed to create backup"
+        if ! gum confirm "Continue without backup?"; then
+            return
+        fi
     fi
 
     # Remove peers from config
@@ -276,6 +282,15 @@ interactive_file_deletion() {
             fi
         done
     done <<< "$selected"
+
+    # Check if any files were matched
+    if [ ${#selected_files[@]:-0} -eq 0 ]; then
+        echo
+        print_error "No files matched selection"
+        echo
+        read -p "Press Enter to continue..."
+        return
+    fi
 
     # Confirm deletion
     echo

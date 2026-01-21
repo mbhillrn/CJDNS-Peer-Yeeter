@@ -321,12 +321,12 @@ show_menu() {
     echo "Config: $CJDNS_CONFIG"
     echo "Backup: $BACKUP_DIR"
     echo
-    echo "1) Peer Adding Wizard (Recommended)"
-    echo "2) Discover & Preview Peers"
-    echo "3) Edit Config File"
-    echo "4) Manage Peers (Interactive) ⭐ NEW"
-    echo "5) View Peer Status"
-    echo "6) Maintenance & Settings"
+    echo "1) 🧙 Peer Adding Wizard (Recommended)"
+    echo "2) 🔍 Discover & Preview Peers"
+    echo "3) ✏️  Edit Config File"
+    echo "4) 🗑️  View Status & Remove Peers"
+    echo "5) 📊 View Peer Status"
+    echo "6) ⚙️  Maintenance & Settings"
     echo "0) Exit"
     echo
 }
@@ -1307,7 +1307,7 @@ view_peer_status() {
 
         # Display each peer from config
         for config_addr in "${all_config_peers[@]}"; do
-            if [ -n "${db_peers[$config_addr]}" ]; then
+            if [ -n "${db_peers[$config_addr]:-}" ]; then
                 # Peer is in database - show full info
                 IFS='|' read -r state quality est_count unr_count last_change consecutive <<< "${db_peers[$config_addr]}"
                 local quality_display=$(printf "%.0f%%" "$quality")
@@ -1331,58 +1331,189 @@ view_peer_status() {
     read -p "Press Enter to continue..."
 }
 
-# Maintenance Menu
-maintenance_menu() {
+# Configuration Settings Submenu
+configuration_settings_menu() {
     while true; do
         clear
         print_ascii_header
-        print_header "Maintenance"
+        print_header "Configuration Settings"
 
-        echo "SETTINGS:"
-        echo "  1) Edit Settings (Interactive) ⭐ NEW"
-        echo "  2) View Current Settings"
+        echo "Current Configuration:"
+        echo "  Config File: $CJDNS_CONFIG"
+        echo "  Service: ${CJDNS_SERVICE:-Disabled}"
+        echo "  Backup Directory: $BACKUP_DIR"
         echo
-        echo "PEER SOURCES:"
-        echo "  3) Manage Peer Sources (Interactive) ⭐ NEW"
-        echo "  4) Reset Local Address Database"
+
+        echo "1) Change Config File Location"
+        echo "2) Change Service Name"
+        echo "3) Change Backup Directory (with migration)"
         echo
-        echo "DATABASE:"
-        echo "  5) Backup Database"
-        echo "  6) Restore Database"
-        echo "  7) Reset Database"
-        echo
-        echo "FILES:"
-        echo "  8) Delete Config Backups (Interactive) ⭐ NEW"
-        echo "  9) Delete Exported Peer Files (Interactive) ⭐ NEW"
-        echo " 10) Import Peers from File"
-        echo " 11) Export Peers to File"
-        echo " 12) Backup Config"
-        echo " 13) Restore Config"
-        echo
-        echo "SYSTEM:"
-        echo " 14) Restart cjdns Service"
-        echo
-        echo "  0) Back to Main Menu"
+        echo "0) Back to Maintenance Menu"
         echo
 
         local choice
         read -p "Enter choice: " choice
 
         case "$choice" in
-            1) interactive_settings_editor ;;
-            2) show_directories ;;
-            3) interactive_peer_sources ;;
+            1) change_config_location ;;
+            2) change_service_name ;;
+            3) change_backup_directory ;;
+            0) return ;;
+            *) print_error "Invalid choice"; sleep 1 ;;
+        esac
+    done
+}
+
+# Peer Sources Management Submenu
+peer_sources_menu() {
+    while true; do
+        clear
+        print_ascii_header
+        print_header "Peer Sources Management"
+
+        # Load and display sources
+        echo "Current Peer Sources:"
+        echo
+        local sources_json=$(jq -c '.sources[]' "$PEER_SOURCES" 2>/dev/null)
+        local count=0
+        while IFS= read -r source; do
+            [ -z "$source" ] && continue
+            local name=$(echo "$source" | jq -r '.name')
+            local enabled=$(echo "$source" | jq -r '.enabled')
+            local type=$(echo "$source" | jq -r '.type')
+
+            local status_icon="✓"
+            local status_text="${GREEN}Enabled${NC}"
+            if [ "$enabled" = "false" ]; then
+                status_icon="✗"
+                status_text="${RED}Disabled${NC}"
+            fi
+
+            echo -e "  $status_icon $name ($type) - $status_text"
+            count=$((count + 1))
+        done <<< "$sources_json"
+
+        if [ $count -eq 0 ]; then
+            echo "  No sources configured"
+        fi
+        echo
+
+        echo "1) Enable/Disable a Source"
+        echo "2) Add New Source"
+        echo "3) Remove Source"
+        echo "4) Reset Local Address Database"
+        echo
+        echo "0) Back to Maintenance Menu"
+        echo
+
+        local choice
+        read -p "Enter choice: " choice
+
+        case "$choice" in
+            1) toggle_peer_source_menu ;;
+            2) add_peer_source_menu ;;
+            3) remove_peer_source_menu ;;
             4) reset_master_list_menu ;;
-            5) database_backup_menu ;;
-            6) database_restore_menu ;;
-            7) reset_database_menu ;;
-            8) interactive_file_deletion "backup" ;;
-            9) interactive_file_deletion "export" ;;
-            10) import_peers_menu ;;
-            11) export_peers_menu ;;
-            12) backup_config_menu ;;
-            13) restore_config_menu ;;
-            14) restart_service ;;
+            0) return ;;
+            *) print_error "Invalid choice"; sleep 1 ;;
+        esac
+    done
+}
+
+# Database Management Submenu
+database_management_menu() {
+    while true; do
+        clear
+        print_ascii_header
+        print_header "Database Management"
+
+        echo "1) Backup Database"
+        echo "2) Restore Database from Backup"
+        echo "3) Reset Database (Clear all peer tracking data)"
+        echo
+        echo "0) Back to Maintenance Menu"
+        echo
+
+        local choice
+        read -p "Enter choice: " choice
+
+        case "$choice" in
+            1) database_backup_menu ;;
+            2) database_restore_menu ;;
+            3) reset_database_menu ;;
+            0) return ;;
+            *) print_error "Invalid choice"; sleep 1 ;;
+        esac
+    done
+}
+
+# File Management Submenu
+file_management_menu() {
+    while true; do
+        clear
+        print_ascii_header
+        print_header "File Management"
+
+        # Count files
+        local backup_count=$(ls -1 "$BACKUP_DIR"/cjdroute_backup_*.conf 2>/dev/null | wc -l)
+        local export_count=$(ls -1 "$BACKUP_DIR"/exported_peers/*.json 2>/dev/null | wc -l)
+
+        echo "Current Files:"
+        echo "  Config Backups: $backup_count"
+        echo "  Exported Peer Files: $export_count"
+        echo
+
+        echo "1) Delete Old Config Backups (multi-select)"
+        echo "2) Delete Exported Peer Files (multi-select)"
+        echo "3) Import Peers from File"
+        echo "4) Export Peers to File"
+        echo "5) Backup Config File"
+        echo "6) Restore Config from Backup"
+        echo
+        echo "0) Back to Maintenance Menu"
+        echo
+
+        local choice
+        read -p "Enter choice: " choice
+
+        case "$choice" in
+            1) interactive_file_deletion "backup" ;;
+            2) interactive_file_deletion "export" ;;
+            3) import_peers_menu ;;
+            4) export_peers_menu ;;
+            5) backup_config_menu ;;
+            6) restore_config_menu ;;
+            0) return ;;
+            *) print_error "Invalid choice"; sleep 1 ;;
+        esac
+    done
+}
+
+# Maintenance Menu
+maintenance_menu() {
+    while true; do
+        clear
+        print_ascii_header
+        print_header "Maintenance & Settings"
+
+        echo "1) ⚙️  Configuration Settings"
+        echo "2) 🌐 Peer Sources Management"
+        echo "3) 💾 Database Management"
+        echo "4) 📁 File Management"
+        echo "5) 🔄 Restart cjdns Service"
+        echo
+        echo "0) Back to Main Menu"
+        echo
+
+        local choice
+        read -p "Enter choice: " choice
+
+        case "$choice" in
+            1) configuration_settings_menu ;;
+            2) peer_sources_menu ;;
+            3) database_management_menu ;;
+            4) file_management_menu ;;
+            5) restart_service ;;
             0) return ;;
             *) print_error "Invalid choice"; sleep 1 ;;
         esac
@@ -1439,6 +1570,155 @@ show_directories() {
 
     echo
     read -p "Press Enter to continue..."
+}
+
+# Toggle peer source on/off (menu-based)
+toggle_peer_source_menu() {
+    clear
+    print_ascii_header
+    print_header "Enable/Disable Peer Source"
+
+    # Load sources and build menu
+    local sources_json=$(jq -c '.sources[]' "$PEER_SOURCES" 2>/dev/null)
+    declare -a source_names
+    declare -a source_statuses
+    local count=1
+
+    echo "Select source to toggle:"
+    echo
+    while IFS= read -r source; do
+        [ -z "$source" ] && continue
+        local name=$(echo "$source" | jq -r '.name')
+        local enabled=$(echo "$source" | jq -r '.enabled')
+        local status="Enabled"
+        [ "$enabled" = "false" ] && status="Disabled"
+
+        echo "  $count) $name [$status]"
+        source_names+=("$name")
+        source_statuses+=("$enabled")
+        count=$((count + 1))
+    done <<< "$sources_json"
+
+    echo
+    echo "  0) Cancel"
+    echo
+
+    local choice
+    read -p "Enter choice: " choice
+
+    if [ "$choice" = "0" ] || [ "$choice" -lt 1 ] || [ "$choice" -ge $count ]; then
+        return
+    fi
+
+    local idx=$((choice - 1))
+    local selected_name="${source_names[$idx]}"
+    local current_state="${source_statuses[$idx]}"
+    local new_state="true"
+    [ "$current_state" = "true" ] && new_state="false"
+
+    jq ".sources |= map(if .name==\"$selected_name\" then .enabled=$new_state else . end)" "$PEER_SOURCES" > "$PEER_SOURCES.tmp"
+    mv "$PEER_SOURCES.tmp" "$PEER_SOURCES"
+
+    echo
+    print_success "Toggled $selected_name to: $new_state"
+    sleep 1
+}
+
+# Add new peer source (menu-based)
+add_peer_source_menu() {
+    clear
+    print_ascii_header
+    print_header "Add New Peer Source"
+    echo
+
+    # Get source name
+    echo "Enter source name (e.g., 'my-peers'):"
+    read -p "> " name
+    [ -z "$name" ] && return
+
+    # Get source type
+    echo
+    echo "Select source type:"
+    echo "  1) GitHub repository"
+    echo "  2) Direct JSON URL"
+    echo "  0) Cancel"
+    echo
+    read -p "Enter choice: " type_choice
+
+    local type
+    case "$type_choice" in
+        1) type="github" ;;
+        2) type="json" ;;
+        *) return ;;
+    esac
+
+    # Get URL
+    echo
+    if [ "$type" = "github" ]; then
+        echo "Enter GitHub repository URL (e.g., https://github.com/user/repo.git):"
+    else
+        echo "Enter direct JSON URL:"
+    fi
+    read -p "> " url
+    [ -z "$url" ] && return
+
+    # Add to sources
+    jq ".sources += [{\"name\": \"$name\", \"type\": \"$type\", \"url\": \"$url\", \"enabled\": true}]" "$PEER_SOURCES" > "$PEER_SOURCES.tmp"
+    mv "$PEER_SOURCES.tmp" "$PEER_SOURCES"
+
+    echo
+    print_success "Added source: $name"
+    sleep 1
+}
+
+# Remove peer source (menu-based)
+remove_peer_source_menu() {
+    clear
+    print_ascii_header
+    print_header "Remove Peer Source"
+    echo
+
+    # Load sources and build menu
+    local sources_json=$(jq -c '.sources[]' "$PEER_SOURCES" 2>/dev/null)
+    declare -a source_names
+    local count=1
+
+    echo "Select source to REMOVE:"
+    echo
+    while IFS= read -r source; do
+        [ -z "$source" ] && continue
+        local name=$(echo "$source" | jq -r '.name')
+
+        echo "  $count) $name"
+        source_names+=("$name")
+        count=$((count + 1))
+    done <<< "$sources_json"
+
+    echo
+    echo "  0) Cancel"
+    echo
+
+    local choice
+    read -p "Enter choice: " choice
+
+    if [ "$choice" = "0" ] || [ "$choice" -lt 1 ] || [ "$choice" -ge $count ]; then
+        return
+    fi
+
+    local idx=$((choice - 1))
+    local selected_name="${source_names[$idx]}"
+
+    echo
+    if ! ask_yes_no "Remove source '$selected_name'?"; then
+        return
+    fi
+
+    jq ".sources |= map(select(.name!=\"$selected_name\"))" "$PEER_SOURCES" > "$PEER_SOURCES.tmp"
+    mv "$PEER_SOURCES.tmp" "$PEER_SOURCES"
+
+    echo
+    print_success "Removed source: $selected_name"
+    sleep 1
 }
 
 # Reset local address database

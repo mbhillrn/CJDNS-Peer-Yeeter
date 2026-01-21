@@ -36,7 +36,23 @@ print_warning() {
 }
 
 print_info() {
-    echo -e "${CYAN}ℹ ${NC}$1"
+    echo -e "${CYAN}$1${NC}"
+}
+
+# Box-style header for main sections
+print_box_header() {
+    local text="$1"
+    local color="${2:-$CYAN}"  # Default to cyan
+    local length=$((${#text} + 4))
+    local line=$(printf '─%.0s' $(seq 1 $length))
+    echo -e "${color}┌${line}┐${NC}"
+    echo -e "${color}│  ${text}  │${NC}"
+    echo -e "${color}└${line}┘${NC}"
+}
+
+# Bold text header
+print_bold() {
+    echo -e "${BOLD}$1${NC}"
 }
 
 # Ask yes/no question (only accepts y/n)

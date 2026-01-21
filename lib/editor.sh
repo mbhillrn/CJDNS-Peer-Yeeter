@@ -428,42 +428,37 @@ config_editor_menu() {
                 if ! command -v fx &>/dev/null; then
                     print_error "fx is not installed"
                     echo
-                    print_info "Install fx with: sudo snap install fx"
-                    print_info "Or during initialization, select yes when prompted"
+                    echo "Install fx with: sudo snap install fx"
+                    echo "Or during initialization, select yes when prompted"
                     sleep 2
                     continue
                 fi
 
-                print_info "Opening interactive JSON editor (fx)"
+                clear
+                print_ascii_header
+                print_bold "Interactive JSON Editor (fx)"
                 echo
-                print_info "fx Tips:"
-                echo "  • Use arrow keys to navigate"
-                echo "  • Press '.' to enter interactive mode"
-                echo "  • Press 'q' to quit"
-                echo "  • Press 'e' to edit in your default editor"
-                echo "  • Mouse support enabled (if your terminal supports it)"
+                echo "Navigation Tips:"
+                echo "  • Arrow keys to navigate, Enter to expand/collapse"
+                echo "  • Press 'q' to quit and save changes"
+                echo "  • Press '?' for help"
                 echo
 
-                # Create backup before editing
+                # Auto-create backup
+                echo "Creating automatic backup..."
                 local backup
-                if ask_yes_no "Create backup before editing?"; then
-                    if backup=$(backup_config "$CJDNS_CONFIG"); then
-                        print_success "Backup created: $backup"
-                    else
-                        print_warning "Backup failed, but continuing"
-                    fi
+                if backup=$(backup_config "$CJDNS_CONFIG"); then
+                    print_success "Backup created: $backup"
+                else
+                    print_warning "Backup failed, but continuing"
                 fi
 
                 echo
-                read -p "Press Enter to open fx..."
+                echo "Opening fx editor..."
+                sleep 1
 
-                # Open fx as the actual user (drop sudo privileges for terminal UI)
-                if [ -n "$SUDO_USER" ]; then
-                    # Run fx as the original user to avoid permission issues
-                    sudo -u "$SUDO_USER" fx "$CJDNS_CONFIG"
-                else
-                    fx "$CJDNS_CONFIG"
-                fi
+                # Open fx (runs as root to access /etc/ files)
+                fx "$CJDNS_CONFIG"
 
                 # Validate after editing
                 if validate_config "$CJDNS_CONFIG"; then
