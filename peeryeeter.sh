@@ -26,6 +26,7 @@ source "$SCRIPT_DIR/lib/config.sh"
 source "$SCRIPT_DIR/lib/database.sh"
 source "$SCRIPT_DIR/lib/master_list.sh"
 source "$SCRIPT_DIR/lib/editor.sh"
+source "$SCRIPT_DIR/lib/prerequisites.sh"
 
 # Global variables (will be set during initialization)
 CJDNS_CONFIG=""
@@ -79,6 +80,19 @@ initialize() {
     fi
 
     print_success "All required tools found (jq, git, wget, sqlite3)"
+
+    # Check for gum (interactive menu tool)
+    print_subheader "Checking Interactive Tools"
+
+    if ! check_gum; then
+        print_warning "gum not found (required for interactive menus)"
+        echo
+        if ! check_prerequisites; then
+            exit 1
+        fi
+    else
+        print_success "gum found (interactive menus enabled)"
+    fi
 
     # Check cjdnstool
     print_subheader "Checking cjdnstool"
