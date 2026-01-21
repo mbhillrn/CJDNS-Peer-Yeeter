@@ -98,51 +98,108 @@ initialize() {
     print_subheader "Detecting CJDNS Configuration"
 
     local detection_result
+    local service_detected=0
     if detection_result=$(detect_cjdns_service); then
         CJDNS_SERVICE=$(echo "$detection_result" | cut -d'|' -f1)
         CJDNS_CONFIG=$(echo "$detection_result" | cut -d'|' -f2)
 
         print_success "Detected cjdns service: $CJDNS_SERVICE"
         print_success "Detected config file: $CJDNS_CONFIG"
+        echo
 
-        if ! ask_yes_no "Is this the correct config file?"; then
+        if ! ask_yes_no "Are these settings correct?"; then
             CJDNS_CONFIG=""
             CJDNS_SERVICE=""
+        else
+            service_detected=1
         fi
     fi
 
-    # Fallback: list available configs
+    # Manual configuration if auto-detection failed or was rejected
     if [ -z "$CJDNS_CONFIG" ]; then
         print_warning "Auto-detection failed or was rejected"
-        print_subheader "Available cjdns config files"
+        print_subheader "Manual Configuration"
+        echo
 
+        # Prompt for service name
+        echo "CJDNS Service Name (EXAMPLE: cjdns.service)"
+        echo "If your service has a different name or you don't have a systemd service,"
+        echo "you can enter it here or leave blank to continue without service management."
+        echo
+        CJDNS_SERVICE=$(ask_input "Service name (or press Enter to skip)" "")
+
+        # Validate service if provided
+        if [ -n "$CJDNS_SERVICE" ]; then
+            echo
+            print_info "Validating service: $CJDNS_SERVICE"
+            if systemctl list-unit-files "$CJDNS_SERVICE" &>/dev/null; then
+                print_success "Service found: $CJDNS_SERVICE"
+                service_detected=1
+            else
+                print_warning "Service '$CJDNS_SERVICE' not found on this system"
+                echo
+                if ask_yes_no "Continue without service management? (You'll need to restart cjdns manually)"; then
+                    print_info "Continuing without service management"
+                    CJDNS_SERVICE=""
+                else
+                    if ask_yes_no "Try a different service name?"; then
+                        CJDNS_SERVICE=$(ask_input "Service name")
+                        if systemctl list-unit-files "$CJDNS_SERVICE" &>/dev/null; then
+                            print_success "Service found: $CJDNS_SERVICE"
+                            service_detected=1
+                        else
+                            print_error "Service still not found. Continuing without service management."
+                            CJDNS_SERVICE=""
+                        fi
+                    else
+                        print_info "Continuing without service management"
+                        CJDNS_SERVICE=""
+                    fi
+                fi
+            fi
+        fi
+
+        # Prompt for config file location
+        echo
+        echo "Config file location (ex. /etc/cjdroute_PORT.conf):"
+        echo "This is REQUIRED for PeerYeeter to function."
+        echo
+
+        # Try to find configs as suggestions
         local configs
         mapfile -t configs < <(list_cjdns_configs)
 
-        if [ ${#configs[@]} -eq 0 ]; then
-            print_error "No cjdns config files found in /etc/"
+        if [ ${#configs[@]} -gt 0 ]; then
+            print_info "Found these config files:"
+            for cfg in "${configs[@]}"; do
+                echo "  - $cfg"
+            done
             echo
-            if ask_yes_no "Would you like to specify a custom config path?"; then
-                CJDNS_CONFIG=$(ask_input "Enter full path to cjdns config file")
-                if [ ! -f "$CJDNS_CONFIG" ]; then
-                    print_error "File not found: $CJDNS_CONFIG"
-                    exit 1
-                fi
-            else
-                exit 1
-            fi
-        else
-            if [ ${#configs[@]} -eq 1 ]; then
-                CJDNS_CONFIG="${configs[0]}"
-                print_info "Found one config file: $CJDNS_CONFIG"
-                if ! ask_yes_no "Use this config file?"; then
-                    exit 1
-                fi
-            else
-                print_info "Found multiple config files:"
-                CJDNS_CONFIG=$(ask_selection "Select your config file:" "${configs[@]}")
-            fi
         fi
+
+        while true; do
+            CJDNS_CONFIG=$(ask_input "Config file path")
+
+            # Validate config file
+            if [ ! -f "$CJDNS_CONFIG" ]; then
+                print_error "File not found: $CJDNS_CONFIG"
+                echo
+                if ask_yes_no "Try again?"; then
+                    continue
+                else
+                    print_error "Cannot proceed without a valid config file"
+                    exit 1
+                fi
+            else
+                break
+            fi
+        done
+    fi
+
+    # Warn if service management is disabled
+    if [ -z "$CJDNS_SERVICE" ] && [ "$service_detected" -eq 0 ]; then
+        echo
+        print_warning "Service management disabled - you'll need to restart cjdns manually after config changes"
     fi
 
     # Validate config file
@@ -184,8 +241,8 @@ initialize() {
         exit 1
     fi
 
-    # Initialize database and master list
-    print_subheader "Initializing Database & Master List"
+    # Initialize database and local address database
+    print_subheader "Initializing Database & Local Address Database"
 
     # Create backup directory with proper permissions
     if ! mkdir -p "$BACKUP_DIR" 2>/dev/null; then
@@ -274,11 +331,12 @@ peer_adding_wizard() {
     echo "  4) IPv4 only"
     echo "  6) IPv6 only"
     echo "  B) Both IPv4 and IPv6"
+    echo "  0) Cancel and return to main menu"
     echo
 
     local protocol
     while true; do
-        read -p "Enter selection (4/6/B): " -r protocol
+        read -p "Enter selection (4/6/B/0): " -r protocol
         case "$protocol" in
             4|[Ii][Pp][Vv]4)
                 protocol="ipv4"
@@ -295,22 +353,28 @@ peer_adding_wizard() {
                 print_success "Both IPv4 and IPv6 selected"
                 break
                 ;;
+            0|[Cc]|[Cc][Aa][Nn][Cc][Ee][Ll])
+                print_info "Cancelled"
+                echo
+                read -p "Press Enter to continue..."
+                return
+                ;;
             *)
-                print_error "Please enter 4, 6, or B"
+                print_error "Please enter 4, 6, B, or 0"
                 ;;
         esac
     done
     echo
 
-    # Step 2: Update master list
-    print_subheader "Step 2: Updating Master Peer List"
+    # Step 2: Update local address database
+    print_subheader "Step 2: Updating Local Address Database"
     print_info "Fetching latest peers from online sources..."
 
     local result=$(update_master_list)
     local master_ipv4=$(echo "$result" | cut -d'|' -f1)
     local master_ipv6=$(echo "$result" | cut -d'|' -f2)
 
-    print_success "Master list updated: $master_ipv4 IPv4, $master_ipv6 IPv6 peers"
+    print_success "Local Address Database updated: $master_ipv4 IPv4, $master_ipv6 IPv6 peers"
     echo
 
     # Step 3: Filter for new peers
@@ -323,7 +387,7 @@ peer_adding_wizard() {
     local updates_ipv4="$WORK_DIR/updates_ipv4.json"
     local updates_ipv6="$WORK_DIR/updates_ipv6.json"
 
-    # Get peers from master list
+    # Get peers from local address database
     if [ "$protocol" = "ipv4" ] || [ "$protocol" = "both" ]; then
         get_master_peers "ipv4" > "$discovered_ipv4"
     else
@@ -748,8 +812,8 @@ discover_preview() {
     print_info "Updating locally stored address list and analyzing available peers"
     echo
 
-    # Update master list
-    print_subheader "Updating Locally Stored Address List"
+    # Update local address database
+    print_subheader "Updating Local Address Database"
     local result=$(update_master_list)
     local local_ipv4=$(echo "$result" | cut -d'|' -f1)
     local local_ipv6=$(echo "$result" | cut -d'|' -f2)
@@ -773,8 +837,8 @@ discover_preview() {
     get_master_peers "ipv4" > "$all_ipv4"
     get_master_peers "ipv6" > "$all_ipv6"
 
-    local new_counts_ipv4=$(smart_duplicate_check "$all_ipv4" "$CJDNS_CONFIG" 0 "$new_ipv4" "$updates_ipv4")
-    local new_counts_ipv6=$(smart_duplicate_check "$all_ipv6" "$CJDNS_CONFIG" 1 "$new_ipv6" "$updates_ipv6")
+    local new_counts_ipv4=$(smart_duplicate_check "$all_ipv4" "$CJDNS_CONFIG" 0 "$new_ipv4" "$updates_ipv4" 0)
+    local new_counts_ipv6=$(smart_duplicate_check "$all_ipv6" "$CJDNS_CONFIG" 1 "$new_ipv6" "$updates_ipv6" 0)
 
     local new_ipv4_count=$(echo "$new_counts_ipv4" | cut -d'|' -f1)
     local new_ipv6_count=$(echo "$new_counts_ipv6" | cut -d'|' -f1)
@@ -1193,8 +1257,8 @@ maintenance_menu() {
         print_ascii_header
         print_header "Maintenance"
 
-        echo "1) Show Directories & Config Info"
-        echo "2) Reset Master Peer List"
+        echo "1) Settings and Configuration"
+        echo "2) Reset Local Address Database"
         echo "3) Manage Peer Sources"
         echo "4) Reset Database"
         echo "5) Import Peers from File"
@@ -1228,61 +1292,75 @@ maintenance_menu() {
 show_directories() {
     clear
     print_ascii_header
-    print_header "Directories & Config Info"
+    print_header "Settings and Configuration"
 
-    echo "Config file:"
-    echo "  $CJDNS_CONFIG"
-    echo
-
-    echo "Backup directory:"
-    echo "  $BACKUP_DIR"
-    echo
-
-    echo "Database:"
-    echo "  $DB_FILE"
-    echo
-
-    echo "Master peer list:"
-    echo "  $MASTER_LIST"
-    echo
-
-    echo "Peer sources:"
-    echo "  $PEER_SOURCES"
-    echo
-
+    # Count various items
     local backup_count=$(ls -1 "$BACKUP_DIR"/cjdroute_backup_*.conf 2>/dev/null | wc -l)
-    echo "Number of backups: $backup_count"
-
+    local export_count=$(ls -1 "$BACKUP_DIR"/exported_peers/*.json 2>/dev/null | wc -l)
     local counts=$(get_master_counts)
     local ipv4_count=$(echo "$counts" | cut -d'|' -f1)
     local ipv6_count=$(echo "$counts" | cut -d'|' -f2)
-    echo "Master list: $ipv4_count IPv4, $ipv6_count IPv6"
+    local service_status="Disabled"
+    if [ -n "$CJDNS_SERVICE" ]; then
+        service_status="$CJDNS_SERVICE"
+    fi
+
+    # Display current settings
+    print_subheader "Current Configuration"
+    echo
+    printf "%-25s %s\n" "CJDNS Config File:" "$CJDNS_CONFIG"
+    printf "%-25s %s\n" "CJDNS Service:" "$service_status"
+    printf "%-25s %s\n" "Backup Directory:" "$BACKUP_DIR"
+    printf "%-25s %s\n" "Database File:" "$DB_FILE"
+    printf "%-25s %s\n" "Local Address DB:" "$MASTER_LIST"
+    printf "%-25s %s\n" "Peer Sources File:" "$PEER_SOURCES"
+    echo
+
+    print_subheader "Storage Statistics"
+    echo
+    printf "%-25s %d\n" "Config Backups:" "$backup_count"
+    printf "%-25s %d\n" "Exported Peer Files:" "$export_count"
+    printf "%-25s %d IPv4, %d IPv6\n" "Local Address DB:" "$ipv4_count" "$ipv6_count"
+    echo
+
+    # Show current config peer counts
+    local config_ipv4=$(get_peer_count "$CJDNS_CONFIG" 0)
+    local config_ipv6=$(get_peer_count "$CJDNS_CONFIG" 1)
+    printf "%-25s %d IPv4, %d IPv6\n" "Peers in Config:" "$config_ipv4" "$config_ipv6"
+    echo
+
+    print_info "Settings management features:"
+    echo "  - Config file location can be changed by re-initializing"
+    echo "  - Backup directory changes: Not yet implemented"
+    echo "  - Service management: Set during initialization"
+    echo
+    print_warning "To change critical settings, restart the application"
 
     echo
     read -p "Press Enter to continue..."
 }
 
-# Reset master peer list
+# Reset local address database
 reset_master_list_menu() {
     clear
     print_ascii_header
-    print_header "Reset Master Peer List"
+    print_header "Reset Local Address Database"
 
-    print_warning "This will delete the current master list and re-download from all sources"
+    print_warning "This will delete the current database and re-download from all sources"
     echo
 
-    if ! ask_yes_no "Are you sure you want to reset the master list?"; then
+    if ! ask_yes_no "Are you sure you want to reset the local address database?"; then
         return
     fi
 
-    print_info "Resetting master peer list..."
+    print_info "Resetting local address database..."
     reset_master_list
 
     local counts=$(get_master_counts)
     local ipv4_count=$(echo "$counts" | cut -d'|' -f1)
     local ipv6_count=$(echo "$counts" | cut -d'|' -f2)
 
-    print_success "Master list reset complete!"
+    print_success "Local Address Database reset complete!"
     print_info "New master list: $ipv4_count IPv4, $ipv6_count IPv6"
 
     echo
@@ -1541,8 +1619,9 @@ restore_config_menu() {
     echo "Available backups in $BACKUP_DIR:"
     echo
 
+    # Get backups sorted by modification time (newest first)
     local backups
-    mapfile -t backups < <(list_backups)
+    mapfile -t backups < <(find "$BACKUP_DIR" -name "cjdroute_backup_*.conf" -type f -printf '%T@ %p\n' 2>/dev/null | sort -rn | cut -d' ' -f2-)
 
     if [ ${#backups[@]} -eq 0 ]; then
         print_warning "No backups found in $BACKUP_DIR"
@@ -1551,7 +1630,7 @@ restore_config_menu() {
         return
     fi
 
-    # Show backups with numbers
+    # Show backups with numbers (newest first)
     for i in "${!backups[@]}"; do
         local backup="${backups[$i]}"
         local timestamp=$(basename "$backup" | sed 's/cjdroute_backup_\(.*\)\.conf/\1/')
@@ -1613,8 +1692,16 @@ restart_service() {
     print_subheader "Restarting cjdns Service"
 
     if [ -z "$CJDNS_SERVICE" ]; then
-        print_warning "Service name not detected"
-        CJDNS_SERVICE=$(ask_input "Enter cjdns service name" "cjdroute")
+        print_error "Service management unavailable"
+        echo
+        echo "Restart function is unavailable because no service was found during initialization."
+        echo "Please restart cjdns manually using one of these methods:"
+        echo "  - sudo systemctl restart cjdns.service"
+        echo "  - sudo systemctl restart cjdroute"
+        echo "  - Or restart using your system's init system"
+        echo
+        read -p "Press Enter to continue..."
+        return 1
     fi
 
     echo "Restarting $CJDNS_SERVICE..."

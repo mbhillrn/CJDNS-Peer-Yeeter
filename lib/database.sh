@@ -96,14 +96,20 @@ EOF
         chmod 644 "$DB_FILE" 2>/dev/null
     fi
 
-    # Migrate existing database if needed
+    # Migrate existing database if needed - check and add missing columns individually
     local has_state_change=$(sqlite3 "$DB_FILE" "PRAGMA table_info(peers);" | grep -c "last_state_change" || echo 0)
     if [ "$has_state_change" -eq 0 ]; then
-        sqlite3 "$DB_FILE" <<'EOF'
-ALTER TABLE peers ADD COLUMN last_state_change INTEGER DEFAULT 0;
-ALTER TABLE peers ADD COLUMN consecutive_checks_in_state INTEGER DEFAULT 0;
-EOF
+        sqlite3 "$DB_FILE" "ALTER TABLE peers ADD COLUMN last_state_change INTEGER DEFAULT 0;" 2>/dev/null || true
     fi
+
+    local has_consecutive=$(sqlite3 "$DB_FILE" "PRAGMA table_info(peers);" | grep -c "consecutive_checks_in_state" || echo 0)
+    if [ "$has_consecutive" -eq 0 ]; then
+        sqlite3 "$DB_FILE" "ALTER TABLE peers ADD COLUMN consecutive_checks_in_state INTEGER DEFAULT 0;" 2>/dev/null || true
+    fi
+
+    # Initialize values for existing rows
+    sqlite3 "$DB_FILE" "UPDATE peers SET last_state_change = last_seen WHERE last_state_change = 0 OR last_state_change IS NULL;" 2>/dev/null || true
+    sqlite3 "$DB_FILE" "UPDATE peers SET consecutive_checks_in_state = 1 WHERE consecutive_checks_in_state = 0 OR consecutive_checks_in_state IS NULL;" 2>/dev/null || true
 
     return $result
 }
