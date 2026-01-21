@@ -275,6 +275,49 @@ get_all_peers_by_quality() {
     sqlite3 "$DB_FILE" "SELECT address, state, quality_score, established_count, unresponsive_count, first_seen, last_state_change, consecutive_checks_in_state FROM peers ORDER BY quality_score DESC;" 2>/dev/null
 }
 
+# Backup database
+backup_database() {
+    local backup_dir="${BACKUP_DIR}/database_backups"
+    mkdir -p "$backup_dir" 2>/dev/null
+
+    if [ ! -f "$DB_FILE" ]; then
+        print_error "Database file not found: $DB_FILE"
+        return 1
+    fi
+
+    local timestamp=$(date +%Y%m%d_%H%M%S)
+    local backup_file="$backup_dir/peer_tracking_backup_$timestamp.db"
+
+    if cp "$DB_FILE" "$backup_file"; then
+        echo "$backup_file"
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Restore database from backup
+restore_database() {
+    local backup_file="$1"
+
+    if [ ! -f "$backup_file" ]; then
+        print_error "Backup file not found: $backup_file"
+        return 1
+    fi
+
+    # Create safety backup of current database
+    if [ -f "$DB_FILE" ]; then
+        local safety_backup="${DB_FILE}.safety"
+        cp "$DB_FILE" "$safety_backup" 2>/dev/null
+    fi
+
+    if cp "$backup_file" "$DB_FILE"; then
+        return 0
+    else
+        return 1
+    fi
+}
+
 # Reset database
 reset_database() {
     if [ -f "$DB_FILE" ]; then

@@ -27,6 +27,7 @@ source "$SCRIPT_DIR/lib/database.sh"
 source "$SCRIPT_DIR/lib/master_list.sh"
 source "$SCRIPT_DIR/lib/editor.sh"
 source "$SCRIPT_DIR/lib/prerequisites.sh"
+source "$SCRIPT_DIR/lib/interactive.sh"
 
 # Global variables (will be set during initialization)
 CJDNS_CONFIG=""
@@ -323,9 +324,9 @@ show_menu() {
     echo "1) Peer Adding Wizard (Recommended)"
     echo "2) Discover & Preview Peers"
     echo "3) Edit Config File"
-    echo "4) Remove Peers"
+    echo "4) Manage Peers (Interactive) ⭐ NEW"
     echo "5) View Peer Status"
-    echo "6) Maintenance"
+    echo "6) Maintenance & Settings"
     echo "0) Exit"
     echo
 }
@@ -1313,31 +1314,51 @@ maintenance_menu() {
         print_ascii_header
         print_header "Maintenance"
 
-        echo "1) Settings and Configuration"
-        echo "2) Reset Local Address Database"
-        echo "3) Manage Peer Sources"
-        echo "4) Reset Database"
-        echo "5) Import Peers from File"
-        echo "6) Export Peers to File"
-        echo "7) Backup Config"
-        echo "8) Restore Config"
-        echo "9) Restart cjdns Service"
-        echo "0) Back to Main Menu"
+        echo "SETTINGS:"
+        echo "  1) Edit Settings (Interactive) ⭐ NEW"
+        echo "  2) View Current Settings"
+        echo
+        echo "PEER SOURCES:"
+        echo "  3) Manage Peer Sources (Interactive) ⭐ NEW"
+        echo "  4) Reset Local Address Database"
+        echo
+        echo "DATABASE:"
+        echo "  5) Backup Database"
+        echo "  6) Restore Database"
+        echo "  7) Reset Database"
+        echo
+        echo "FILES:"
+        echo "  8) Delete Config Backups (Interactive) ⭐ NEW"
+        echo "  9) Delete Exported Peer Files (Interactive) ⭐ NEW"
+        echo " 10) Import Peers from File"
+        echo " 11) Export Peers to File"
+        echo " 12) Backup Config"
+        echo " 13) Restore Config"
+        echo
+        echo "SYSTEM:"
+        echo " 14) Restart cjdns Service"
+        echo
+        echo "  0) Back to Main Menu"
         echo
 
         local choice
         read -p "Enter choice: " choice
 
         case "$choice" in
-            1) show_directories ;;
-            2) reset_master_list_menu ;;
-            3) manage_sources_menu ;;
-            4) reset_database_menu ;;
-            5) import_peers_menu ;;
-            6) export_peers_menu ;;
-            7) backup_config_menu ;;
-            8) restore_config_menu ;;
-            9) restart_service ;;
+            1) interactive_settings_editor ;;
+            2) show_directories ;;
+            3) interactive_peer_sources ;;
+            4) reset_master_list_menu ;;
+            5) database_backup_menu ;;
+            6) database_restore_menu ;;
+            7) reset_database_menu ;;
+            8) interactive_file_deletion "backup" ;;
+            9) interactive_file_deletion "export" ;;
+            10) import_peers_menu ;;
+            11) export_peers_menu ;;
+            12) backup_config_menu ;;
+            13) restore_config_menu ;;
+            14) restart_service ;;
             0) return ;;
             *) print_error "Invalid choice"; sleep 1 ;;
         esac
@@ -1462,6 +1483,106 @@ manage_sources_menu() {
 }
 
 # Reset database
+# Database backup menu
+database_backup_menu() {
+    clear
+    print_ascii_header
+    print_header "Backup Database"
+
+    print_info "Create a backup of the peer tracking database"
+    echo
+
+    if ! ask_yes_no "Create a backup of the database?"; then
+        return
+    fi
+
+    local backup
+    if backup=$(backup_database); then
+        print_success "Database backup created successfully"
+        echo
+        echo "Backup location: $backup"
+        echo "Backup size: $(ls -lh "$backup" | awk '{print $5}')"
+    else
+        print_error "Failed to create database backup"
+    fi
+
+    echo
+    read -p "Press Enter to continue..."
+}
+
+# Database restore menu
+database_restore_menu() {
+    clear
+    print_ascii_header
+    print_header "Restore Database from Backup"
+
+    local backup_dir="$BACKUP_DIR/database_backups"
+    echo "Available database backups in $backup_dir:"
+    echo
+
+    # Get backups sorted by modification time (newest first)
+    local backups
+    mapfile -t backups < <(find "$backup_dir" -name "peer_tracking_backup_*.db" -type f -printf '%T@ %p\n' 2>/dev/null | sort -rn | cut -d' ' -f2-)
+
+    if [ ${#backups[@]} -eq 0 ]; then
+        print_warning "No database backups found"
+        echo
+        read -p "Press Enter to continue..."
+        return
+    fi
+
+    # Show backups with numbers (newest first)
+    for i in "${!backups[@]}"; do
+        local backup="${backups[$i]}"
+        local timestamp=$(basename "$backup" | sed 's/peer_tracking_backup_\(.*\)\.db/\1/')
+        local size=$(ls -lh "$backup" | awk '{print $5}')
+        local date_formatted=$(format_timestamp $(stat -c %Y "$backup"))
+        echo "  $((i+1))) $timestamp - $date_formatted ($size)"
+    done
+
+    echo
+    echo "  0) Cancel"
+    echo
+
+    local choice
+    while true; do
+        read -p "Select backup to restore (0-${#backups[@]}): " choice
+
+        if [ "$choice" = "0" ]; then
+            print_info "Cancelled"
+            echo
+            read -p "Press Enter to continue..."
+            return
+        elif [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le ${#backups[@]} ]; then
+            break
+        else
+            print_error "Invalid selection"
+        fi
+    done
+
+    local backup_file="${backups[$((choice-1))]}"
+    echo
+    print_warning "This will replace the current database with the backup"
+    echo
+
+    if ! ask_yes_no "Are you SURE you want to restore this backup?"; then
+        print_info "Cancelled"
+        echo
+        read -p "Press Enter to continue..."
+        return
+    fi
+
+    if restore_database "$backup_file"; then
+        print_success "Database restored successfully"
+    else
+        print_error "Failed to restore database"
+    fi
+
+    echo
+    read -p "Press Enter to continue..."
+}
+
+# Reset database menu
 reset_database_menu() {
     clear
     print_ascii_header
@@ -1470,6 +1591,17 @@ reset_database_menu() {
     print_warning "This will delete all peer quality tracking data"
     echo
 
+    # Offer to backup first
+    if ask_yes_no "Create a backup before resetting?"; then
+        local backup
+        if backup=$(backup_database); then
+            print_success "Backup created: $backup"
+        else
+            print_warning "Backup failed, but continuing"
+        fi
+    fi
+
+    echo
     if ! ask_yes_no "Are you sure you want to reset the database?"; then
         return
     fi
@@ -1868,7 +2000,7 @@ main() {
             1) peer_adding_wizard ;;
             2) discover_preview ;;
             3) config_editor_menu ;;
-            4) remove_peers_menu ;;
+            4) interactive_peer_management ;;
             5) view_peer_status ;;
             6) maintenance_menu ;;
             0)

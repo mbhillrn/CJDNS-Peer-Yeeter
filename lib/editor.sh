@@ -327,6 +327,12 @@ config_editor_menu() {
         echo "6) IPv6 Interface Settings (bind, beacon)"
         echo "7) Router Section (DNS seeds, tunnels, publicPeer)"
         echo "8) Full Config (edit entire file - ADVANCED)"
+
+        # Show fx option if available
+        if command -v fx &>/dev/null; then
+            echo "9) Interactive JSON Editor (fx) - RECOMMENDED"
+        fi
+
         echo "0) Back to Main Menu"
         echo
 
@@ -410,6 +416,60 @@ config_editor_menu() {
                 else
                     print_error "Config file is INVALID!"
                     if ask_yes_no "Restore from backup?"; then
+                        cp "$backup" "$CJDNS_CONFIG"
+                        print_success "Config restored from backup"
+                    fi
+                fi
+
+                echo
+                read -p "Press Enter to continue..."
+                ;;
+            9)
+                if ! command -v fx &>/dev/null; then
+                    print_error "fx is not installed"
+                    echo
+                    print_info "Install fx with: sudo apt install fx"
+                    sleep 2
+                    continue
+                fi
+
+                print_info "Opening interactive JSON editor (fx)"
+                echo
+                print_info "fx Tips:"
+                echo "  • Use arrow keys to navigate"
+                echo "  • Press '.' to enter interactive mode"
+                echo "  • Press 'q' to quit"
+                echo "  • Press 'e' to edit in your default editor"
+                echo "  • Mouse support enabled (if your terminal supports it)"
+                echo
+
+                # Create backup before editing
+                local backup
+                if ask_yes_no "Create backup before editing?"; then
+                    if backup=$(backup_config "$CJDNS_CONFIG"); then
+                        print_success "Backup created: $backup"
+                    else
+                        print_warning "Backup failed, but continuing"
+                    fi
+                fi
+
+                echo
+                read -p "Press Enter to open fx..."
+
+                # Open fx
+                fx "$CJDNS_CONFIG"
+
+                # Validate after editing
+                if validate_config "$CJDNS_CONFIG"; then
+                    print_success "Config file is valid"
+                    echo
+                    if ask_yes_no "Restart cjdns service now?"; then
+                        restart_service
+                    fi
+                else
+                    print_error "Config file is INVALID!"
+                    echo
+                    if [ -n "$backup" ] && ask_yes_no "Restore from backup?"; then
                         cp "$backup" "$CJDNS_CONFIG"
                         print_success "Config restored from backup"
                     fi

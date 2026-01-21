@@ -90,6 +90,74 @@ install_fzf() {
     fi
 }
 
+# Check if fx is installed (optional but recommended for JSON editing)
+check_fx() {
+    if command -v fx &>/dev/null; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Install fx via precompiled binary
+install_fx() {
+    print_info "Installing fx (interactive JSON viewer/editor)..."
+    echo
+
+    if [ "$EUID" -ne 0 ]; then
+        print_error "This installation requires root privileges"
+        return 1
+    fi
+
+    local temp_dir=$(mktemp -d)
+    cd "$temp_dir" || return 1
+
+    print_working "Downloading fx binary..."
+
+    # Detect architecture
+    local arch=$(uname -m)
+    local fx_binary
+
+    case "$arch" in
+        x86_64)
+            fx_binary="fx_linux_amd64"
+            ;;
+        aarch64|arm64)
+            fx_binary="fx_linux_arm64"
+            ;;
+        *)
+            print_complete "Unsupported architecture: $arch" "failed"
+            cd - >/dev/null
+            rm -rf "$temp_dir"
+            return 1
+            ;;
+    esac
+
+    # Download latest fx release
+    if ! wget -q "https://github.com/antonmedv/fx/releases/latest/download/$fx_binary" -O fx 2>/dev/null; then
+        print_complete "Failed to download fx" "failed"
+        cd - >/dev/null
+        rm -rf "$temp_dir"
+        return 1
+    fi
+    print_complete "Downloaded fx binary" "success"
+
+    # Install to /usr/local/bin
+    print_working "Installing fx to /usr/local/bin..."
+    chmod +x fx
+    if ! mv fx /usr/local/bin/fx 2>/dev/null; then
+        print_complete "Failed to install fx" "failed"
+        cd - >/dev/null
+        rm -rf "$temp_dir"
+        return 1
+    fi
+    print_complete "fx installed successfully!" "success"
+
+    cd - >/dev/null
+    rm -rf "$temp_dir"
+    return 0
+}
+
 # Check all prerequisites
 check_prerequisites() {
     local missing_tools=()
@@ -103,6 +171,10 @@ check_prerequisites() {
     # Check optional tools
     if ! check_fzf; then
         optional_missing+=("fzf")
+    fi
+
+    if ! check_fx; then
+        optional_missing+=("fx")
     fi
 
     if [ ${#missing_tools[@]} -gt 0 ]; then
@@ -135,10 +207,39 @@ check_prerequisites() {
         fi
     fi
 
-    # Inform about optional tools
+    # Inform about optional tools and offer installation
     if [ ${#optional_missing[@]} -gt 0 ]; then
+        echo
         print_info "Optional tools not installed: ${optional_missing[*]}"
-        print_info "These tools enhance the experience but are not required"
+        echo
+        print_info "fx: Interactive JSON viewer/editor with mouse support"
+        print_info "fzf: Fuzzy finder for enhanced file selection"
+        echo
+
+        # Offer to install fx if missing
+        if ! check_fx; then
+            if ask_yes_no "Would you like to install fx now? (recommended for JSON editing)"; then
+                echo
+                if install_fx; then
+                    print_success "fx installed successfully!"
+                else
+                    print_warning "fx installation failed - you can install it manually later"
+                fi
+            fi
+        fi
+
+        # Offer to install fzf if missing
+        if ! check_fzf; then
+            echo
+            if ask_yes_no "Would you like to install fzf now? (useful for file selection)"; then
+                echo
+                if install_fzf; then
+                    print_success "fzf installed successfully!"
+                else
+                    print_warning "fzf installation failed - you can install it manually later"
+                fi
+            fi
+        fi
     fi
 
     return 0
