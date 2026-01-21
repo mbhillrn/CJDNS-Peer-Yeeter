@@ -1,0 +1,10 @@
+# editor/OS junk
+.DS_Store
+*.swp
+*.swo
+*~
+
+# local scratch / logs
+*.log
+scratch/
+tmp/
