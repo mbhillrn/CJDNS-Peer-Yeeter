@@ -97,19 +97,49 @@ EOF
     fi
 
     # Migrate existing database if needed - check and add missing columns individually
-    local has_state_change=$(sqlite3 "$DB_FILE" "PRAGMA table_info(peers);" | grep -c "last_state_change" || echo 0)
-    if [ "$has_state_change" -eq 0 ]; then
-        sqlite3 "$DB_FILE" "ALTER TABLE peers ADD COLUMN last_state_change INTEGER DEFAULT 0;" 2>/dev/null || true
-    fi
+    # Check if consecutive_checks_in_state column exists
+    local has_consecutive=$(sqlite3 "$DB_FILE" "PRAGMA table_info(peers);" 2>/dev/null | grep -c "consecutive_checks_in_state" || echo 0)
 
-    local has_consecutive=$(sqlite3 "$DB_FILE" "PRAGMA table_info(peers);" | grep -c "consecutive_checks_in_state" || echo 0)
     if [ "$has_consecutive" -eq 0 ]; then
-        sqlite3 "$DB_FILE" "ALTER TABLE peers ADD COLUMN consecutive_checks_in_state INTEGER DEFAULT 0;" 2>/dev/null || true
-    fi
+        # Column doesn't exist - need to migrate
+        print_warning "Database migration required - adding new tracking columns"
 
-    # Initialize values for existing rows
-    sqlite3 "$DB_FILE" "UPDATE peers SET last_state_change = last_seen WHERE last_state_change = 0 OR last_state_change IS NULL;" 2>/dev/null || true
-    sqlite3 "$DB_FILE" "UPDATE peers SET consecutive_checks_in_state = 1 WHERE consecutive_checks_in_state = 0 OR consecutive_checks_in_state IS NULL;" 2>/dev/null || true
+        # Try to add the columns
+        sqlite3 "$DB_FILE" "ALTER TABLE peers ADD COLUMN last_state_change INTEGER DEFAULT 0;" 2>/dev/null
+        sqlite3 "$DB_FILE" "ALTER TABLE peers ADD COLUMN consecutive_checks_in_state INTEGER DEFAULT 0;" 2>/dev/null
+
+        # Verify the migration worked
+        has_consecutive=$(sqlite3 "$DB_FILE" "PRAGMA table_info(peers);" 2>/dev/null | grep -c "consecutive_checks_in_state" || echo 0)
+
+        if [ "$has_consecutive" -eq 0 ]; then
+            # Migration failed - database is corrupted or incompatible
+            print_error "Database migration failed - recreating database"
+            rm -f "$DB_FILE"
+
+            # Recreate database with new schema
+            sqlite3 "$DB_FILE" <<'EOF2'
+CREATE TABLE IF NOT EXISTS peers (
+    address TEXT PRIMARY KEY,
+    state TEXT,
+    first_seen INTEGER,
+    last_seen INTEGER,
+    last_state_change INTEGER,
+    consecutive_checks_in_state INTEGER DEFAULT 0,
+    established_count INTEGER DEFAULT 0,
+    unresponsive_count INTEGER DEFAULT 0,
+    other_count INTEGER DEFAULT 0,
+    quality_score REAL DEFAULT 0
+);
+EOF2
+            chmod 644 "$DB_FILE" 2>/dev/null
+            print_success "Database recreated with new schema"
+        else
+            # Migration succeeded - initialize values for existing rows
+            sqlite3 "$DB_FILE" "UPDATE peers SET last_state_change = last_seen WHERE last_state_change = 0 OR last_state_change IS NULL;" 2>/dev/null || true
+            sqlite3 "$DB_FILE" "UPDATE peers SET consecutive_checks_in_state = 1 WHERE consecutive_checks_in_state = 0 OR consecutive_checks_in_state IS NULL;" 2>/dev/null || true
+            print_success "Database migration completed"
+        fi
+    fi
 
     return $result
 }

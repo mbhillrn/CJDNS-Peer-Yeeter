@@ -128,3 +128,27 @@ print_subheader() {
     echo -e "${CYAN}${BOLD}$title${NC}"
     echo -e "${CYAN}$(printf -- '-%.0s' $(seq 1 ${#title}))${NC}"
 }
+
+# Print working status (for operations in progress)
+print_working() {
+    local message="$1"
+    echo -e "${YELLOW}⟳${NC} $message"
+}
+
+# Print completed operation with final status
+print_complete() {
+    local message="$1"
+    local status="${2:-success}"  # success, failed, warning
+
+    case "$status" in
+        success)
+            echo -e "${GREEN}✓${NC} $message"
+            ;;
+        failed)
+            echo -e "${RED}✗${NC} $message"
+            ;;
+        warning)
+            echo -e "${YELLOW}⚠${NC} $message"
+            ;;
+    esac
+}

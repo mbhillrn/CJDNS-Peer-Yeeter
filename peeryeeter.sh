@@ -814,15 +814,18 @@ discover_preview() {
 
     # Update local address database
     print_subheader "Updating Local Address Database"
-    local result=$(update_master_list)
-    local local_ipv4=$(echo "$result" | cut -d'|' -f1)
-    local local_ipv6=$(echo "$result" | cut -d'|' -f2)
-    print_success "Locally stored address list: $local_ipv4 IPv4, $local_ipv6 IPv6"
+    echo -n "Fetching from peer sources... "
+    local result=$(update_master_list 2>&1)
+    local local_ipv4=$(echo "$result" | tail -1 | cut -d'|' -f1)
+    local local_ipv6=$(echo "$result" | tail -1 | cut -d'|' -f2)
+    print_success "Done"
+    echo
+    echo "  • Local Address Database: $local_ipv4 IPv4, $local_ipv6 IPv6 peers"
 
     # Get current config counts
     local config_ipv4=$(get_peer_count "$CJDNS_CONFIG" 0)
     local config_ipv6=$(get_peer_count "$CJDNS_CONFIG" 1)
-    print_success "CJDNS config file: $config_ipv4 IPv4, $config_ipv6 IPv6 peers"
+    echo "  • CJDNS Config File: $config_ipv4 IPv4, $config_ipv6 IPv6 peers"
     echo
 
     # Filter for new peers
@@ -899,18 +902,24 @@ discover_preview() {
 
             echo
             print_success "Pingable peers not in config: $pingable_ipv4_count IPv4, $pingable_ipv6_count IPv6"
+
+            # Show pingable peers details if requested
+            if [ "$pingable_ipv4_count" -gt 0 ] || [ "$pingable_ipv6_count" -gt 0 ]; then
+                echo
+                if ask_yes_no "View all pingable peers?"; then
+                    if [ "$pingable_ipv4_count" -gt 0 ]; then
+                        print_subheader "Pingable IPv4 Peers"
+                        show_peer_details "$pingable_ipv4" 99999
+                    fi
+
+                    if [ "$pingable_ipv6_count" -gt 0 ]; then
+                        echo
+                        print_subheader "Pingable IPv6 Peers"
+                        show_peer_details "$pingable_ipv6" 99999
+                    fi
+                fi
+            fi
         fi
-    fi
-
-    # Show available peers details if requested
-    echo
-    if ask_yes_no "View all peers from locally stored address list?"; then
-        print_subheader "All IPv4 Peers in Local Database"
-        show_peer_details "$all_ipv4" 99999
-
-        echo
-        print_subheader "All IPv6 Peers in Local Database"
-        show_peer_details "$all_ipv6" 99999
     fi
 
     echo
@@ -1353,15 +1362,20 @@ reset_master_list_menu() {
         return
     fi
 
-    print_info "Resetting local address database..."
-    reset_master_list
+    echo
+    print_working "Resetting local address database..."
+    reset_master_list >/dev/null 2>&1
 
     local counts=$(get_master_counts)
     local ipv4_count=$(echo "$counts" | cut -d'|' -f1)
     local ipv6_count=$(echo "$counts" | cut -d'|' -f2)
 
+    echo
     print_success "Local Address Database reset complete!"
-    print_info "New master list: $ipv4_count IPv4, $ipv6_count IPv6"
+    echo
+    echo -e "  ${BOLD}Database Statistics:${NC}"
+    echo -e "    • IPv4 Peers: ${GREEN}${BOLD}$ipv4_count${NC}"
+    echo -e "    • IPv6 Peers: ${GREEN}${BOLD}$ipv6_count${NC}"
 
     echo
     read -p "Press Enter to continue..."
@@ -1432,7 +1446,56 @@ import_peers_menu() {
     print_info "Import peers from a JSON file"
     echo
 
-    local file_path=$(ask_input "Enter path to JSON file")
+    # Check for exported peer files
+    local export_dir="$BACKUP_DIR/exported_peers"
+    local exports
+    mapfile -t exports < <(find "$export_dir" -name "*.json" -type f -printf '%T@ %p\n' 2>/dev/null | sort -rn | cut -d' ' -f2-)
+
+    if [ ${#exports[@]} -gt 0 ]; then
+        echo "Available export files:"
+        echo
+        for i in "${!exports[@]}"; do
+            local export_file="${exports[$i]}"
+            local filename=$(basename "$export_file")
+            local size=$(ls -lh "$export_file" | awk '{print $5}')
+            echo "  $((i+1))) $filename ($size)"
+        done
+        echo
+        echo "  0) Enter custom path"
+        echo
+
+        local choice
+        while true; do
+            read -p "Select file to import (0-${#exports[@]}, or 'q' to quit): " choice
+
+            if [[ "$choice" == "q" ]] || [[ "$choice" == "Q" ]]; then
+                return
+            elif [[ "$choice" == "0" ]]; then
+                break
+            elif [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le ${#exports[@]} ]; then
+                local file_path="${exports[$((choice-1))]}"
+                break
+            else
+                print_error "Invalid selection"
+            fi
+        done
+    fi
+
+    # Custom path entry
+    if [ -z "$file_path" ] || [ "$choice" == "0" ]; then
+        echo
+        echo "Enter path to JSON file (example: $export_dir/ipv4_peers_*.json)"
+        echo "or press Ctrl+C to cancel"
+        echo
+        read -p "File path: " -r file_path
+
+        if [ -z "$file_path" ]; then
+            print_error "No file specified"
+            echo
+            read -p "Press Enter to continue..."
+            return
+        fi
+    fi
 
     if [ ! -f "$file_path" ]; then
         print_error "File not found: $file_path"

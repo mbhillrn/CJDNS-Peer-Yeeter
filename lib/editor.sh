@@ -335,16 +335,6 @@ config_editor_menu() {
 
         case "$choice" in
             1|2|3|4|5|6|7)
-                # Create backup first
-                local backup
-                if backup=$(backup_config "$CJDNS_CONFIG"); then
-                    print_success "Backup created: $backup"
-                else
-                    print_error "Failed to create backup"
-                    sleep 2
-                    continue
-                fi
-
                 local temp_config="$WORK_DIR/config_new.json"
 
                 case "$choice" in
@@ -359,11 +349,27 @@ config_editor_menu() {
 
                 if [ $? -eq 0 ]; then
                     if [ -f "$temp_config" ]; then
-                        cp "$temp_config" "$CJDNS_CONFIG"
-                        print_success "Config file updated!"
+                        echo
+                        if ask_yes_no "Save changes to config file?"; then
+                            # Create backup now, after confirming save
+                            echo
+                            if ask_yes_no "Create backup before saving?"; then
+                                local backup
+                                if backup=$(backup_config "$CJDNS_CONFIG"); then
+                                    print_success "Backup created: $backup"
+                                else
+                                    print_warning "Backup failed, but continuing with save"
+                                fi
+                            fi
 
-                        if ask_yes_no "Restart cjdns service now?"; then
-                            restart_service
+                            cp "$temp_config" "$CJDNS_CONFIG"
+                            print_success "Config file updated!"
+
+                            if ask_yes_no "Restart cjdns service now?"; then
+                                restart_service
+                            fi
+                        else
+                            print_info "Changes discarded"
                         fi
                     fi
                 fi
@@ -379,13 +385,18 @@ config_editor_menu() {
                     continue
                 fi
 
+                # Create backup before full config edit for safety
                 local backup
-                if backup=$(backup_config "$CJDNS_CONFIG"); then
-                    print_success "Backup created: $backup"
-                else
-                    print_error "Failed to create backup"
-                    sleep 2
-                    continue
+                echo
+                if ask_yes_no "Create backup before editing?"; then
+                    if backup=$(backup_config "$CJDNS_CONFIG"); then
+                        print_success "Backup created: $backup"
+                    else
+                        print_error "Backup failed"
+                        if ! ask_yes_no "Continue without backup?"; then
+                            continue
+                        fi
+                    fi
                 fi
 
                 local editor=$(get_editor)
