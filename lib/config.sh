@@ -172,7 +172,12 @@ show_peer_details() {
         return
     fi
 
-    echo "Showing first $max_count of $total peers:"
+    # Smart display message
+    if [ "$max_count" -ge "$total" ]; then
+        echo "Found $total peers:"
+    else
+        echo "Showing first $max_count of $total peers:"
+    fi
     echo
 
     jq -r --argjson max "$max_count" '

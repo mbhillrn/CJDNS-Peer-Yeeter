@@ -1057,18 +1057,30 @@ remove_peers_menu() {
         update_peer_state "$address" "$state"
     done < "$peer_states"
 
-    # Get all peers sorted by quality
-    print_info "Loading peer quality data..."
+    # Get all peers from BOTH interfaces in config
+    print_info "Loading peers from config..."
     echo
 
-    local all_peers=$(get_all_peers_by_quality)
+    declare -a all_config_peers
+    # Get IPv4 peers
+    while IFS= read -r addr; do
+        [ -n "$addr" ] && all_config_peers+=("$addr")
+    done < <(jq -r '.interfaces.UDPInterface[0].connectTo // {} | keys[]' "$CJDNS_CONFIG" 2>/dev/null)
 
-    if [ -z "$all_peers" ]; then
-        print_warning "No peers found in database"
+    # Get IPv6 peers
+    while IFS= read -r addr; do
+        [ -n "$addr" ] && all_config_peers+=("$addr")
+    done < <(jq -r '.interfaces.UDPInterface[1].connectTo // {} | keys[]' "$CJDNS_CONFIG" 2>/dev/null)
+
+    if [ ${#all_config_peers[@]} -eq 0 ]; then
+        print_warning "No peers found in config"
         echo
         read -p "Press Enter to continue..."
         return
     fi
+
+    # Get quality data from database
+    local all_peers=$(get_all_peers_by_quality)
 
     # Build arrays for display
     declare -a peer_addresses
@@ -1079,6 +1091,7 @@ remove_peers_menu() {
     echo "Est.=Established count, Unr.=Unresponsive count"
     echo
 
+    # Display peers with quality data first (sorted by quality)
     while IFS='|' read -r address state quality est_count unr_count first_seen last_change consecutive; do
         [ -z "$address" ] && continue
 
@@ -1101,6 +1114,26 @@ remove_peers_menu() {
 
         peer_displays+=("$address ($state)")
     done <<< "$all_peers"
+
+    # Display peers from config that aren't in database yet (not yet checked)
+    for config_addr in "${all_config_peers[@]}"; do
+        # Check if this address was already displayed
+        local already_shown=false
+        for shown_addr in "${peer_addresses[@]}"; do
+            if [ "$config_addr" = "$shown_addr" ]; then
+                already_shown=true
+                break
+            fi
+        done
+
+        if [ "$already_shown" = false ]; then
+            index=$((index + 1))
+            peer_addresses+=("$config_addr")
+            printf "%3d) ${GRAY}○${NC} %-40s Q:%-5s Est:%-3d Unr:%-3d (Not yet checked)\n" \
+                "$index" "$config_addr" "N/A" "0" "0"
+            peer_displays+=("$config_addr (UNCHECKED)")
+        fi
+    done
 
     echo
     print_info "Enter peer numbers to remove (space or comma-separated, e.g., '1 3 5' or '1,3,5')"
@@ -1617,10 +1650,19 @@ export_peers_menu() {
     echo "  4) IPv4 peers"
     echo "  6) IPv6 peers"
     echo "  B) Both (separate files)"
+    echo "  0) Cancel and return to main menu"
     echo
 
     local selection
     read -p "Enter selection: " -r selection
+
+    # Handle exit
+    if [[ "$selection" == "0" ]] || [[ "$selection" =~ ^[Qq]$ ]]; then
+        print_info "Cancelled"
+        echo
+        read -p "Press Enter to continue..."
+        return
+    fi
 
     local export_dir="$BACKUP_DIR/exported_peers"
     mkdir -p "$export_dir"
