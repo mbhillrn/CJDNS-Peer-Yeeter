@@ -457,8 +457,18 @@ config_editor_menu() {
                 echo "Opening fx editor..."
                 sleep 1
 
-                # Open fx (runs as root to access /etc/ files)
-                fx "$CJDNS_CONFIG"
+                # Open fx with piping to avoid filename parsing issues
+                # Create temp file for editing
+                local temp_fx="/tmp/cjdns_fx_edit_$$.json"
+                cat "$CJDNS_CONFIG" | fx > "$temp_fx"
+
+                # If fx succeeded and file was modified, update config
+                if [ -s "$temp_fx" ]; then
+                    mv "$temp_fx" "$CJDNS_CONFIG"
+                else
+                    rm -f "$temp_fx"
+                    print_warning "No changes made or fx cancelled"
+                fi
 
                 # Validate after editing
                 if validate_config "$CJDNS_CONFIG"; then
