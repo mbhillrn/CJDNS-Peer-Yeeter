@@ -28,6 +28,7 @@ source "$SCRIPT_DIR/lib/master_list.sh"
 source "$SCRIPT_DIR/lib/editor.sh"
 source "$SCRIPT_DIR/lib/prerequisites.sh"
 source "$SCRIPT_DIR/lib/interactive.sh"
+source "$SCRIPT_DIR/lib/guided_editor.sh"
 
 # Global variables (will be set during initialization)
 CJDNS_CONFIG=""
@@ -2303,7 +2304,7 @@ main() {
         case "$choice" in
             1) peer_adding_wizard ;;
             2) discover_preview ;;
-            3) config_editor_menu ;;
+            3) guided_config_editor ;;
             4) interactive_peer_management ;;
             5) view_peer_status ;;
             6) maintenance_menu ;;
