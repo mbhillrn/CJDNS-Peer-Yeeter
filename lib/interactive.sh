@@ -117,7 +117,8 @@ interactive_peer_management() {
     done <<< "$selected"
 
     # Check if any peers were selected
-    if [ ${#selected_addresses[@]:-0} -eq 0 ]; then
+    local num_selected=${#selected_addresses[@]}
+    if [ ${num_selected:-0} -eq 0 ]; then
         echo
         print_error "No peers matched selection"
         echo
@@ -284,7 +285,8 @@ interactive_file_deletion() {
     done <<< "$selected"
 
     # Check if any files were matched
-    if [ ${#selected_files[@]:-0} -eq 0 ]; then
+    local num_files=${#selected_files[@]}
+    if [ ${num_files:-0} -eq 0 ]; then
         echo
         print_error "No files matched selection"
         echo
