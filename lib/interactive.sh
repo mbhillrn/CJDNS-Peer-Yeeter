@@ -98,7 +98,7 @@ interactive_peer_management() {
 
     local selected
     # Add explicit options and handle cancellation
-    selected=$(gum choose --no-limit --height 20 "${peer_options[@]}" 2>&1)
+    selected=$(gum choose --no-limit --height 20 "${peer_options[@]}" </dev/tty >/dev/tty 2>&1)
     local gum_exit=$?
 
     if [ $gum_exit -ne 0 ] || [ -z "$selected" ]; then
@@ -134,7 +134,7 @@ interactive_peer_management() {
     done
 
     echo
-    if ! gum confirm "Are you SURE you want to remove these peers?"; then
+    if ! gum confirm "Are you SURE you want to remove these peers?" </dev/tty >/dev/tty; then
         print_info "Cancelled"
         echo
         read -p "Press Enter to continue..."
@@ -149,7 +149,7 @@ interactive_peer_management() {
         print_success "Backup created: $backup"
     else
         print_error "Failed to create backup"
-        if ! gum confirm "Continue without backup?"; then
+        if ! gum confirm "Continue without backup?" </dev/tty >/dev/tty; then
             return
         fi
     fi
@@ -190,7 +190,7 @@ interactive_peer_management() {
         print_success "Removed $ipv4_removed IPv4 and $ipv6_removed IPv6 peer(s)"
 
         echo
-        if gum confirm "Restart cjdns service now?"; then
+        if gum confirm "Restart cjdns service now?" </dev/tty >/dev/tty; then
             restart_service
         fi
     else
@@ -261,7 +261,7 @@ interactive_file_deletion() {
     echo
 
     local selected
-    selected=$(gum choose --no-limit --height 20 "${file_options[@]}" 2>&1)
+    selected=$(gum choose --no-limit --height 20 "${file_options[@]}" </dev/tty >/dev/tty 2>&1)
     local gum_exit=$?
 
     # Check if user cancelled (ESC key) or no selection
@@ -302,7 +302,7 @@ interactive_file_deletion() {
     done
 
     echo
-    if ! gum confirm "Are you SURE you want to delete these files?"; then
+    if ! gum confirm "Are you SURE you want to delete these files?" </dev/tty >/dev/tty; then
         print_info "Cancelled"
         echo
         read -p "Press Enter to continue..."
@@ -394,7 +394,7 @@ change_config_location() {
     fi
 
     local new_config
-    new_config=$(gum input --placeholder "Enter new config file path (or press Ctrl+C to cancel)" --width 80)
+    new_config=$(gum input --placeholder "Enter new config file path (or press Ctrl+C to cancel)" --width 80) </dev/tty >/dev/tty
 
     if [ -z "$new_config" ]; then
         print_info "Cancelled"
@@ -432,7 +432,7 @@ change_service_name() {
     echo
 
     local new_service
-    new_service=$(gum input --placeholder "Enter service name (e.g., cjdns.service) or press Ctrl+C to cancel" --width 80)
+    new_service=$(gum input --placeholder "Enter service name (e.g., cjdns.service) or press Ctrl+C to cancel" --width 80) </dev/tty >/dev/tty
 
     if [ -z "$new_service" ]; then
         print_info "Cancelled"
@@ -447,7 +447,7 @@ change_service_name() {
     else
         print_warning "Service '$new_service' not found on system"
         echo
-        if gum confirm "Set it anyway? (service management may not work)"; then
+        if gum confirm "Set it anyway? (service management may not work)" </dev/tty >/dev/tty; then
             CJDNS_SERVICE="$new_service"
             print_success "Service name updated (unvalidated)"
         else
@@ -474,7 +474,7 @@ change_backup_directory() {
     echo
 
     local new_dir
-    new_dir=$(gum input --placeholder "Enter new backup directory path (or press Ctrl+C to cancel)" --width 80)
+    new_dir=$(gum input --placeholder "Enter new backup directory path (or press Ctrl+C to cancel)" --width 80) </dev/tty >/dev/tty
 
     if [ -z "$new_dir" ]; then
         print_info "Cancelled"
@@ -490,7 +490,7 @@ change_backup_directory() {
 
     # Confirm migration
     echo
-    if ! gum confirm "Migrate all files from $BACKUP_DIR to $new_dir?"; then
+    if ! gum confirm "Migrate all files from $BACKUP_DIR to $new_dir?" </dev/tty >/dev/tty; then
         print_info "Cancelled"
         sleep 1
         return
@@ -516,7 +516,7 @@ change_backup_directory() {
 
             # Offer to remove old directory
             echo
-            if gum confirm "Remove old backup directory?"; then
+            if gum confirm "Remove old backup directory?" </dev/tty >/dev/tty; then
                 rm -rf "${BACKUP_DIR%/}"
                 print_success "Old directory removed"
             fi
@@ -628,7 +628,7 @@ toggle_peer_source() {
     echo
 
     local selected
-    selected=$(gum choose --height 15 "${sources[@]}" 2>&1)
+    selected=$(gum choose --height 15 "${sources[@]}" </dev/tty >/dev/tty 2>&1)
     local gum_exit=$?
 
     if [ $gum_exit -ne 0 ] || [ -z "$selected" ]; then
@@ -661,7 +661,7 @@ add_peer_source() {
     echo
 
     local name
-    name=$(gum input --placeholder "Source name (e.g., my-peers)" --width 80)
+    name=$(gum input --placeholder "Source name (e.g., my-peers)" --width 80) </dev/tty >/dev/tty
     [ -z "$name" ] && return
 
     echo
@@ -669,16 +669,16 @@ add_peer_source() {
     echo
 
     local type
-    type=$(gum choose --height 6 "github" "json" 2>&1)
+    type=$(gum choose --height 6 "github" "json" </dev/tty >/dev/tty 2>&1)
     local gum_exit=$?
     [ $gum_exit -ne 0 ] || [ -z "$type" ] && return
 
     echo
     local url
     if [ "$type" = "github" ]; then
-        url=$(gum input --placeholder "GitHub repo URL (e.g., https://github.com/user/repo.git)" --width 80)
+        url=$(gum input --placeholder "GitHub repo URL (e.g., https://github.com/user/repo.git)" --width 80) </dev/tty >/dev/tty
     else
-        url=$(gum input --placeholder "JSON file URL" --width 80)
+        url=$(gum input --placeholder "JSON file URL" --width 80) </dev/tty >/dev/tty
     fi
     [ -z "$url" ] && return
 
@@ -711,7 +711,7 @@ remove_peer_source() {
     echo
 
     local selected
-    selected=$(gum choose --height 15 "${sources[@]}" 2>&1)
+    selected=$(gum choose --height 15 "${sources[@]}" </dev/tty >/dev/tty 2>&1)
     local gum_exit=$?
 
     if [ $gum_exit -ne 0 ] || [ -z "$selected" ]; then
@@ -721,7 +721,7 @@ remove_peer_source() {
     local name=$(echo "$selected" | sed -E 's/^[✓✗] ([^ ]+) .*/\1/')
 
     echo
-    if gum confirm "Remove source: $name?"; then
+    if gum confirm "Remove source: $name?" </dev/tty >/dev/tty; then
         jq ".sources |= map(select(.name!=\"$name\"))" "$PEER_SOURCES" > "$PEER_SOURCES.tmp"
         mv "$PEER_SOURCES.tmp" "$PEER_SOURCES"
         echo
