@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # Guided Config Editor - User-friendly gum-based JSON editing
-# This module provides step-by-step guided workflows for editing cjdns config
 
 # Add a new peer with guided prompts
 add_peer_guided() {
@@ -13,7 +12,7 @@ add_peer_guided() {
     print_bold "Step 1: Select Peer Type"
     echo
     local peer_type
-    peer_type=$(gum choose --height 6 "IPv4 Peer" "IPv6 Peer" "Cancel" </dev/tty >/dev/tty 2>&1)
+    peer_type=$(gum choose --height 6 "IPv4 Peer" "IPv6 Peer" "Cancel" 2>&1 </dev/tty)
     local exit_code=$?
 
     if [ $exit_code -ne 0 ] || [ -z "$peer_type" ] || [ "$peer_type" = "Cancel" ]; then
@@ -39,9 +38,9 @@ add_peer_guided() {
     echo "IP Address:"
     local ip_addr
     if [ "$peer_type" = "IPv4 Peer" ]; then
-        ip_addr=$(gum input --placeholder "Example: 192.168.1.1" --width 60) </dev/tty >/dev/tty
+        ip_addr=$(gum input --placeholder "Example: 192.168.1.1" --width 60 </dev/tty)
     else
-        ip_addr=$(gum input --placeholder "Example: 2001:db8::1 (without brackets)" --width 60) </dev/tty >/dev/tty
+        ip_addr=$(gum input --placeholder "Example: 2001:db8::1 (without brackets)" --width 60 </dev/tty)
     fi
     [ -z "$ip_addr" ] && return
 
@@ -54,7 +53,7 @@ add_peer_guided() {
     echo
     echo "Port:"
     local port
-    port=$(gum input --placeholder "Example: 51820" --width 60) </dev/tty >/dev/tty
+    port=$(gum input --placeholder "Example: 51820" --width 60 </dev/tty)
     [ -z "$port" ] && return
 
     # Build full address
@@ -64,14 +63,14 @@ add_peer_guided() {
     echo
     echo "Password:"
     local password
-    password=$(gum input --placeholder "Example: jkq88yt0r236c02..." --width 60) </dev/tty >/dev/tty
+    password=$(gum input --placeholder "Example: jkq88yt0r236c02..." --width 60 </dev/tty)
     [ -z "$password" ] && return
 
     # Get public key
     echo
     echo "Public Key:"
     local pubkey
-    pubkey=$(gum input --placeholder "Example: qb2knvkp2frp7vul...r0.k" --width 60) </dev/tty >/dev/tty
+    pubkey=$(gum input --placeholder "Example: qb2knvkp2frp7vul...r0.k" --width 60 </dev/tty)
     [ -z "$pubkey" ] && return
 
     # Step 3: Common optional field (login)
@@ -85,7 +84,7 @@ add_peer_guided() {
     echo "Login (commonly used, but optional):"
     echo "Press Enter to skip, or enter a login name"
     local login
-    login=$(gum input --placeholder "Example: default-login" --width 60) </dev/tty >/dev/tty
+    login=$(gum input --placeholder "Example: default-login" --width 60 </dev/tty)
 
     # Step 4: Custom fields loop
     declare -A custom_fields
@@ -124,14 +123,14 @@ add_peer_guided() {
         echo
         echo "Field name (e.g., peerName, contact, gpg, location):"
         local field_name
-        field_name=$(gum input --placeholder "Enter field name" --width 60) </dev/tty >/dev/tty
+        field_name=$(gum input --placeholder "Enter field name" --width 60 </dev/tty)
         [ -z "$field_name" ] && continue
 
         # Get field value
         echo
         echo "Value for '$field_name':"
         local field_value
-        field_value=$(gum input --placeholder "Enter value" --width 60) </dev/tty >/dev/tty
+        field_value=$(gum input --placeholder "Enter value" --width 60 </dev/tty)
         [ -z "$field_value" ] && continue
 
         # Store custom field
@@ -222,51 +221,59 @@ add_peer_guided() {
     read -p "Press Enter to continue..."
 }
 
-# View all peers (read-only)
+# View all peers (read-only) - ENHANCED to show ALL fields
 view_all_peers() {
     clear
     print_ascii_header
     print_header "View All Peers"
     echo
 
-    # Get IPv4 peers
-    local ipv4_peers=$(jq -r '.interfaces.UDPInterface[0].connectTo // {} | to_entries | .[] | "\(.key)|\(.value.login // "no-login")|\(.value.publicKey)"' "$CJDNS_CONFIG" 2>/dev/null)
-    local ipv4_count=$(echo "$ipv4_peers" | grep -c "^" || echo 0)
-
-    # Get IPv6 peers
-    local ipv6_peers=$(jq -r '.interfaces.UDPInterface[1].connectTo // {} | to_entries | .[] | "\(.key)|\(.value.login // "no-login")|\(.value.publicKey)"' "$CJDNS_CONFIG" 2>/dev/null)
-    local ipv6_count=$(echo "$ipv6_peers" | grep -c "^" || echo 0)
-
-    print_bold "IPv4 Peers ($ipv4_count total)"
+    # Get IPv4 peers with ALL fields
+    local ipv4_count=0
+    print_bold "IPv4 Peers"
     echo
-    if [ $ipv4_count -gt 0 ]; then
-        while IFS='|' read -r address login pubkey; do
-            [ -z "$address" ] && continue
-            echo "  Address:    $address"
-            echo "  Login:      $login"
-            echo "  Public Key: ${pubkey:0:40}..."
-            echo
-        done <<< "$ipv4_peers"
-    else
+
+    while IFS= read -r peer_entry; do
+        [ -z "$peer_entry" ] && continue
+        ipv4_count=$((ipv4_count + 1))
+
+        local address=$(echo "$peer_entry" | jq -r '.key')
+        echo "Peer #$ipv4_count: $address"
+
+        # Show ALL fields in the peer object
+        echo "$peer_entry" | jq -r '.value | to_entries | .[] | "  \(.key): \(.value)"'
+        echo
+    done < <(jq -c '.interfaces.UDPInterface[0].connectTo // {} | to_entries | .[]' "$CJDNS_CONFIG" 2>/dev/null)
+
+    if [ $ipv4_count -eq 0 ]; then
         echo "  No IPv4 peers configured"
         echo
     fi
 
-    print_bold "IPv6 Peers ($ipv6_count total)"
+    # Get IPv6 peers with ALL fields
+    local ipv6_count=0
+    print_bold "IPv6 Peers"
     echo
-    if [ $ipv6_count -gt 0 ]; then
-        while IFS='|' read -r address login pubkey; do
-            [ -z "$address" ] && continue
-            echo "  Address:    $address"
-            echo "  Login:      $login"
-            echo "  Public Key: ${pubkey:0:40}..."
-            echo
-        done <<< "$ipv6_peers"
-    else
+
+    while IFS= read -r peer_entry; do
+        [ -z "$peer_entry" ] && continue
+        ipv6_count=$((ipv6_count + 1))
+
+        local address=$(echo "$peer_entry" | jq -r '.key')
+        echo "Peer #$ipv6_count: $address"
+
+        # Show ALL fields
+        echo "$peer_entry" | jq -r '.value | to_entries | .[] | "  \(.key): \(.value)"'
+        echo
+    done < <(jq -c '.interfaces.UDPInterface[1].connectTo // {} | to_entries | .[]' "$CJDNS_CONFIG" 2>/dev/null)
+
+    if [ $ipv6_count -eq 0 ]; then
         echo "  No IPv6 peers configured"
         echo
     fi
 
+    echo "Total: $ipv4_count IPv4 peers, $ipv6_count IPv6 peers"
+    echo
     read -p "Press Enter to continue..."
 }
 
@@ -282,9 +289,6 @@ guided_config_editor() {
         echo
         echo "1) ➕ Add New Peer"
         echo "2) 👁️  View All Peers"
-        echo "3) 🗑️  Remove Peers (coming soon)"
-        echo "4) ✏️  Edit Existing Peer (coming soon)"
-        echo "5) 🔐 Manage Authorized Passwords (coming soon)"
         echo
         echo "0) Back to Main Menu"
         echo
@@ -295,9 +299,6 @@ guided_config_editor() {
         case "$choice" in
             1) add_peer_guided ;;
             2) view_all_peers ;;
-            3) print_warning "Coming soon!"; sleep 1 ;;
-            4) print_warning "Coming soon!"; sleep 1 ;;
-            5) print_warning "Coming soon!"; sleep 1 ;;
             0) return ;;
             *) print_error "Invalid choice"; sleep 1 ;;
         esac
