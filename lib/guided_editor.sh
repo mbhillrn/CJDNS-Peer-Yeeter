@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Guided Config Editor - Interactive form-based peer editor
+# Guided Config Editor - Compatible with gum v0.17.0 (no form command)
 
-# Add a new peer with interactive form editor
+# Add a new peer with interactive editor
 add_peer_guided() {
     clear
     print_ascii_header
-    print_header "Add New Peer - Interactive Form Editor"
+    print_header "Add New Peer - Interactive Editor"
     echo
 
     # Step 1: Select peer type
@@ -22,65 +22,138 @@ add_peer_guided() {
     fi
 
     local interface_index
-    local ip_example
     if [ "$peer_type" = "IPv4 Peer" ]; then
         interface_index=0
-        ip_example="192.168.1.1"
     else
         interface_index=1
-        ip_example="2001:db8::1"
     fi
 
-    # Step 2: Required fields using gum form
-    clear
-    print_ascii_header
-    print_header "Add New Peer - Required Fields"
-    echo
-    print_bold "Step 2: Enter Peer Information"
-    echo
-    print_info "Fill in all required fields. Use Tab to move between fields, Enter to submit."
-    echo
+    # Initialize peer fields
+    local ip_addr="" port="" password="" pubkey="" login=""
+    declare -A custom_fields
 
-    # Create temporary file for form data
-    local form_file="$WORK_DIR/peer_form_$$.txt"
-
-    # Use gum form to get required fields all at once
-    gum form \
-        --title="Peer Information (Required Fields)" \
-        "IP Address" "$ip_example" \
-        "Port" "51820" \
-        "Password" "" \
-        "Public Key" "" \
-        "Login (optional)" "" \
-        2>/dev/tty </dev/tty > "$form_file"
-
-    local form_exit=$?
-    if [ $form_exit -ne 0 ] || [ ! -s "$form_file" ]; then
-        rm -f "$form_file"
-        print_info "Cancelled"
+    # Step 2: Interactive field editor
+    while true; do
+        clear
+        print_ascii_header
+        print_header "Add New Peer - Edit Fields"
         echo
-        read -p "Press Enter to continue..."
-        return
-    fi
-
-    # Parse form results
-    local ip_addr port password pubkey login
-    {
-        read -r ip_addr
-        read -r port
-        read -r password
-        read -r pubkey
-        read -r login
-    } < "$form_file"
-    rm -f "$form_file"
-
-    # Validate required fields
-    if [ -z "$ip_addr" ] || [ -z "$port" ] || [ -z "$password" ] || [ -z "$pubkey" ]; then
-        print_error "Missing required fields (IP, Port, Password, or Public Key)"
+        print_bold "Current Peer Configuration:"
         echo
-        read -p "Press Enter to continue..."
-        return
-    fi
+        echo "┌────────────────────────────────────────────────────────────────┐"
+        printf "│ %-15s %-46s │\n" "IP Address:" "${ip_addr:-<not set>}"
+        printf "│ %-15s %-46s │\n" "Port:" "${port:-<not set>}"
+        if [ -n "$password" ]; then
+            printf "│ %-15s %-46s │\n" "Password:" "${password:0:40}..."
+        else
+            printf "│ %-15s %-46s │\n" "Password:" "<not set>"
+        fi
+        if [ -n "$pubkey" ]; then
+            printf "│ %-15s %-46s │\n" "Public Key:" "${pubkey:0:40}..."
+        else
+            printf "│ %-15s %-46s │\n" "Public Key:" "<not set>"
+        fi
+        printf "│ %-15s %-46s │\n" "Login:" "${login:-<optional>}"
+
+        if [ ${#custom_fields[@]} -gt 0 ]; then
+            echo "├────────────────────────────────────────────────────────────────┤"
+            printf "│ %-62s │\n" "OPTIONAL FIELDS:"
+            for field_name in "${!custom_fields[@]}"; do
+                local val="${custom_fields[$field_name]}"
+                printf "│ %-15s %-46s │\n" "$field_name:" "${val:0:46}"
+            done
+        fi
+        echo "└────────────────────────────────────────────────────────────────┘"
+        echo
+
+        # Check if required fields are filled
+        local can_save=false
+        if [ -n "$ip_addr" ] && [ -n "$port" ] && [ -n "$password" ] && [ -n "$pubkey" ]; then
+            can_save=true
+        fi
+
+        # Build menu options
+        local -a menu_options=()
+        menu_options+=("Edit IP Address")
+        menu_options+=("Edit Port")
+        menu_options+=("Edit Password")
+        menu_options+=("Edit Public Key")
+        menu_options+=("Edit Login (optional)")
+        menu_options+=("Add/Edit Custom Field")
+
+        if [ $can_save = true ]; then
+            menu_options+=("✓ SAVE AND ADD PEER")
+        else
+            menu_options+=("✗ Save (missing required fields)")
+        fi
+        menu_options+=("Cancel")
+
+        echo
+        print_info "Select a field to edit, or Save when ready:"
+        echo
+
+        local choice
+        choice=$(gum choose --height 12 "${menu_options[@]}" 2>/dev/tty </dev/tty)
+
+        case "$choice" in
+            "Edit IP Address")
+                echo
+                if [ "$peer_type" = "IPv4 Peer" ]; then
+                    ip_addr=$(gum input --placeholder "Example: 192.168.1.1" --value "$ip_addr" --width 60 2>/dev/tty </dev/tty)
+                else
+                    ip_addr=$(gum input --placeholder "Example: 2001:db8::1 (no brackets)" --value "$ip_addr" --width 60 2>/dev/tty </dev/tty)
+                fi
+                ;;
+            "Edit Port")
+                echo
+                port=$(gum input --placeholder "Example: 51820" --value "$port" --width 60 2>/dev/tty </dev/tty)
+                ;;
+            "Edit Password")
+                echo
+                password=$(gum input --placeholder "Peer password" --value "$password" --width 60 2>/dev/tty </dev/tty)
+                ;;
+            "Edit Public Key")
+                echo
+                pubkey=$(gum input --placeholder "Peer public key (ends with .k)" --value "$pubkey" --width 60 2>/dev/tty </dev/tty)
+                ;;
+            "Edit Login (optional)")
+                echo
+                login=$(gum input --placeholder "Login name (optional)" --value "$login" --width 60 2>/dev/tty </dev/tty)
+                ;;
+            "Add/Edit Custom Field")
+                echo
+                local field_name
+                field_name=$(gum input --placeholder "Field name (e.g., peerName, contact, gpg, location)" --width 60 2>/dev/tty </dev/tty)
+                if [ -n "$field_name" ]; then
+                    echo
+                    local field_value
+                    field_value=$(gum input --placeholder "Value for $field_name" --value "${custom_fields[$field_name]}" --width 60 2>/dev/tty </dev/tty)
+                    if [ -n "$field_value" ]; then
+                        custom_fields["$field_name"]="$field_value"
+                    fi
+                fi
+                ;;
+            "✓ SAVE AND ADD PEER")
+                break
+                ;;
+            "✗ Save (missing required fields)")
+                echo
+                print_error "Cannot save - missing required fields:"
+                [ -z "$ip_addr" ] && echo "  • IP Address"
+                [ -z "$port" ] && echo "  • Port"
+                [ -z "$password" ] && echo "  • Password"
+                [ -z "$pubkey" ] && echo "  • Public Key"
+                echo
+                read -p "Press Enter to continue editing..."
+                ;;
+            "Cancel"|"")
+                print_info "Cancelled"
+                echo
+                read -p "Press Enter to continue..."
+                return
+                ;;
+        esac
+    done
 
     # Wrap IPv6 in brackets if needed
     if [ "$peer_type" = "IPv6 Peer" ] && [[ ! "$ip_addr" =~ ^\[ ]]; then
@@ -90,104 +163,12 @@ add_peer_guided() {
     # Build full address
     local full_address="${ip_addr}:${port}"
 
-    # Step 3: Optional fields using gum form
-    clear
-    print_ascii_header
-    print_header "Add New Peer - Optional Fields"
-    echo
-    print_bold "Step 3: Additional Optional Fields"
-    echo
-    print_info "Add optional metadata fields (peerName, contact, location, gpg, etc.)"
-    print_info "Leave blank to skip. Use Tab to move between fields, Enter to submit."
-    echo
-
-    declare -A custom_fields
-
-    if gum confirm "Add optional metadata fields (peerName, contact, location, gpg)?" 2>/dev/tty </dev/tty; then
-        local opt_form="$WORK_DIR/peer_opt_$$.txt"
-
-        gum form \
-            --title="Optional Metadata Fields" \
-            "Peer Name" "" \
-            "Contact" "" \
-            "Location" "" \
-            "GPG" "" \
-            2>/dev/tty </dev/tty > "$opt_form"
-
-        if [ -s "$opt_form" ]; then
-            local peerName contact location gpg
-            {
-                read -r peerName
-                read -r contact
-                read -r location
-                read -r gpg
-            } < "$opt_form"
-
-            [ -n "$peerName" ] && custom_fields["peerName"]="$peerName"
-            [ -n "$contact" ] && custom_fields["contact"]="$contact"
-            [ -n "$location" ] && custom_fields["location"]="$location"
-            [ -n "$gpg" ] && custom_fields["gpg"]="$gpg"
-        fi
-        rm -f "$opt_form"
-    fi
-
-    # Step 4: Custom additional fields
-    while true; do
-        clear
-        print_ascii_header
-        print_header "Add New Peer - Custom Fields"
-        echo
-        print_bold "Step 4: Add Custom Fields"
-        echo
-
-        echo "Current peer configuration:"
-        echo "  Address:    $full_address"
-        echo "  Password:   ${password:0:20}..."
-        echo "  Public Key: ${pubkey:0:20}..."
-        [ -n "$login" ] && echo "  Login:      $login"
-
-        # Show existing custom fields
-        if [ ${#custom_fields[@]} -gt 0 ]; then
-            echo
-            echo "Optional fields added:"
-            for field_name in "${!custom_fields[@]}"; do
-                echo "  $field_name: ${custom_fields[$field_name]}"
-            done
-        fi
-
-        echo
-        if ! gum confirm "Add another custom field?" 2>/dev/tty </dev/tty; then
-            break
-        fi
-
-        # Get custom field using form
-        local custom_form="$WORK_DIR/peer_custom_$$.txt"
-        gum form \
-            --title="Add Custom Field" \
-            "Field Name" "" \
-            "Field Value" "" \
-            2>/dev/tty </dev/tty > "$custom_form"
-
-        if [ -s "$custom_form" ]; then
-            local field_name field_value
-            {
-                read -r field_name
-                read -r field_value
-            } < "$custom_form"
-
-            if [ -n "$field_name" ] && [ -n "$field_value" ]; then
-                custom_fields["$field_name"]="$field_value"
-            fi
-        fi
-        rm -f "$custom_form"
-    done
-
-    # Step 5: Preview and confirm
+    # Step 3: Preview and confirm
     clear
     print_ascii_header
     print_header "Add New Peer - Review"
     echo
-    print_bold "Step 5: Review and Confirm"
+    print_bold "Review and Confirm"
     echo
 
     echo "You are about to add this peer:"
@@ -335,77 +316,156 @@ edit_peer_guided() {
     peer_data=$(jq --arg addr "$peer_addr" --argjson idx "$interface_index" \
         '.interfaces.UDPInterface[$idx].connectTo[$addr]' "$CJDNS_CONFIG")
 
-    # Extract current values
+    # Extract all current values
     local password=$(echo "$peer_data" | jq -r '.password // ""')
     local pubkey=$(echo "$peer_data" | jq -r '.publicKey // ""')
     local login=$(echo "$peer_data" | jq -r '.login // ""')
-    local peerName=$(echo "$peer_data" | jq -r '.peerName // ""')
-    local contact=$(echo "$peer_data" | jq -r '.contact // ""')
-    local location=$(echo "$peer_data" | jq -r '.location // ""')
-    local gpg=$(echo "$peer_data" | jq -r '.gpg // ""')
 
-    # Show edit form
-    clear
-    print_ascii_header
-    print_header "Edit Peer: $peer_addr"
-    echo
-    print_info "Modify the fields below. Use Tab to navigate, Enter to save."
-    echo
+    # Extract all other fields into custom_fields
+    declare -A custom_fields
+    while IFS='|' read -r key value; do
+        if [ "$key" != "password" ] && [ "$key" != "publicKey" ] && [ "$key" != "login" ] && [ -n "$key" ]; then
+            custom_fields["$key"]="$value"
+        fi
+    done < <(echo "$peer_data" | jq -r 'to_entries[] | "\(.key)|\(.value)"')
 
-    local form_file="$WORK_DIR/edit_peer_$$.txt"
-
-    gum form \
-        --title="Edit Peer Information" \
-        "Password" "$password" \
-        "Public Key" "$pubkey" \
-        "Login" "$login" \
-        "Peer Name" "$peerName" \
-        "Contact" "$contact" \
-        "Location" "$location" \
-        "GPG" "$gpg" \
-        2>/dev/tty </dev/tty > "$form_file"
-
-    if [ ! -s "$form_file" ]; then
-        rm -f "$form_file"
-        print_info "Cancelled"
+    # Interactive edit loop
+    while true; do
+        clear
+        print_ascii_header
+        print_header "Edit Peer: $peer_addr"
         echo
-        read -p "Press Enter to continue..."
-        return
-    fi
-
-    # Parse form results
-    local new_password new_pubkey new_login new_peerName new_contact new_location new_gpg
-    {
-        read -r new_password
-        read -r new_pubkey
-        read -r new_login
-        read -r new_peerName
-        read -r new_contact
-        read -r new_location
-        read -r new_gpg
-    } < "$form_file"
-    rm -f "$form_file"
-
-    # Validate required fields
-    if [ -z "$new_password" ] || [ -z "$new_pubkey" ]; then
-        print_error "Password and Public Key are required"
+        print_bold "Current Configuration:"
         echo
-        read -p "Press Enter to continue..."
-        return
-    fi
+        echo "┌────────────────────────────────────────────────────────────────┐"
+        printf "│ %-15s %-46s │\n" "Address:" "$peer_addr"
+        if [ -n "$password" ]; then
+            printf "│ %-15s %-46s │\n" "Password:" "${password:0:40}..."
+        else
+            printf "│ %-15s %-46s │\n" "Password:" "<not set>"
+        fi
+        if [ -n "$pubkey" ]; then
+            printf "│ %-15s %-46s │\n" "Public Key:" "${pubkey:0:40}..."
+        else
+            printf "│ %-15s %-46s │\n" "Public Key:" "<not set>"
+        fi
+        printf "│ %-15s %-46s │\n" "Login:" "${login:-<not set>}"
+
+        if [ ${#custom_fields[@]} -gt 0 ]; then
+            echo "├────────────────────────────────────────────────────────────────┤"
+            printf "│ %-62s │\n" "OPTIONAL FIELDS:"
+            for field_name in "${!custom_fields[@]}"; do
+                local val="${custom_fields[$field_name]}"
+                printf "│ %-15s %-46s │\n" "$field_name:" "${val:0:46}"
+            done
+        fi
+        echo "└────────────────────────────────────────────────────────────────┘"
+        echo
+
+        # Check if required fields are filled
+        local can_save=false
+        if [ -n "$password" ] && [ -n "$pubkey" ]; then
+            can_save=true
+        fi
+
+        # Build menu options
+        local -a menu_options=()
+        menu_options+=("Edit Password")
+        menu_options+=("Edit Public Key")
+        menu_options+=("Edit Login")
+        menu_options+=("Add/Edit Custom Field")
+        menu_options+=("Remove Custom Field")
+
+        if [ $can_save = true ]; then
+            menu_options+=("✓ SAVE CHANGES")
+        else
+            menu_options+=("✗ Save (missing required fields)")
+        fi
+        menu_options+=("Cancel")
+
+        echo
+        print_info "Select a field to edit, or Save when ready:"
+        echo
+
+        local choice
+        choice=$(gum choose --height 12 "${menu_options[@]}" 2>/dev/tty </dev/tty)
+
+        case "$choice" in
+            "Edit Password")
+                echo
+                password=$(gum input --placeholder "Peer password" --value "$password" --width 60 2>/dev/tty </dev/tty)
+                ;;
+            "Edit Public Key")
+                echo
+                pubkey=$(gum input --placeholder "Peer public key (ends with .k)" --value "$pubkey" --width 60 2>/dev/tty </dev/tty)
+                ;;
+            "Edit Login")
+                echo
+                login=$(gum input --placeholder "Login name (optional)" --value "$login" --width 60 2>/dev/tty </dev/tty)
+                ;;
+            "Add/Edit Custom Field")
+                echo
+                local field_name
+                field_name=$(gum input --placeholder "Field name (e.g., peerName, contact, gpg, location)" --width 60 2>/dev/tty </dev/tty)
+                if [ -n "$field_name" ]; then
+                    echo
+                    local field_value
+                    field_value=$(gum input --placeholder "Value for $field_name" --value "${custom_fields[$field_name]}" --width 60 2>/dev/tty </dev/tty)
+                    if [ -n "$field_value" ]; then
+                        custom_fields["$field_name"]="$field_value"
+                    fi
+                fi
+                ;;
+            "Remove Custom Field")
+                if [ ${#custom_fields[@]} -eq 0 ]; then
+                    echo
+                    print_warning "No custom fields to remove"
+                    sleep 1
+                else
+                    echo
+                    local -a field_list=()
+                    for fn in "${!custom_fields[@]}"; do
+                        field_list+=("$fn")
+                    done
+                    local to_remove
+                    to_remove=$(gum choose --height 10 "${field_list[@]}" "Cancel" 2>/dev/tty </dev/tty)
+                    if [ -n "$to_remove" ] && [ "$to_remove" != "Cancel" ]; then
+                        unset custom_fields["$to_remove"]
+                    fi
+                fi
+                ;;
+            "✓ SAVE CHANGES")
+                break
+                ;;
+            "✗ Save (missing required fields)")
+                echo
+                print_error "Cannot save - missing required fields:"
+                [ -z "$password" ] && echo "  • Password"
+                [ -z "$pubkey" ] && echo "  • Public Key"
+                echo
+                read -p "Press Enter to continue editing..."
+                ;;
+            "Cancel"|"")
+                print_info "Cancelled"
+                echo
+                read -p "Press Enter to continue..."
+                return
+                ;;
+        esac
+    done
 
     # Build new peer JSON
     local new_peer_json
     new_peer_json=$(jq -n \
-        --arg pw "$new_password" \
-        --arg pk "$new_pubkey" \
+        --arg pw "$password" \
+        --arg pk "$pubkey" \
         '{password: $pw, publicKey: $pk}')
 
-    [ -n "$new_login" ] && new_peer_json=$(echo "$new_peer_json" | jq --arg v "$new_login" '. + {login: $v}')
-    [ -n "$new_peerName" ] && new_peer_json=$(echo "$new_peer_json" | jq --arg v "$new_peerName" '. + {peerName: $v}')
-    [ -n "$new_contact" ] && new_peer_json=$(echo "$new_peer_json" | jq --arg v "$new_contact" '. + {contact: $v}')
-    [ -n "$new_location" ] && new_peer_json=$(echo "$new_peer_json" | jq --arg v "$new_location" '. + {location: $v}')
-    [ -n "$new_gpg" ] && new_peer_json=$(echo "$new_peer_json" | jq --arg v "$new_gpg" '. + {gpg: $v}')
+    [ -n "$login" ] && new_peer_json=$(echo "$new_peer_json" | jq --arg v "$login" '. + {login: $v}')
+
+    for field_name in "${!custom_fields[@]}"; do
+        new_peer_json=$(echo "$new_peer_json" | jq --arg fn "$field_name" --arg fv "${custom_fields[$field_name]}" '. + {($fn): $fv}')
+    done
 
     # Preview changes
     clear
