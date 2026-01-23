@@ -55,7 +55,7 @@ add_peer_guided() {
         fi
         printf "│ %-15s %-46s │\n" "Login:" "${login:-<optional>}"
 
-        if [ ${#custom_fields[@]} -gt 0 ]; then
+        if [ ${#custom_fields[@]:-0} -gt 0 ]; then
             echo "├────────────────────────────────────────────────────────────────┤"
             printf "│ %-62s │\n" "OPTIONAL FIELDS:"
             for field_name in "${!custom_fields[@]}"; do
@@ -351,7 +351,7 @@ edit_peer_guided() {
         fi
         printf "│ %-15s %-46s │\n" "Login:" "${login:-<not set>}"
 
-        if [ ${#custom_fields[@]} -gt 0 ]; then
+        if [ ${#custom_fields[@]:-0} -gt 0 ]; then
             echo "├────────────────────────────────────────────────────────────────┤"
             printf "│ %-62s │\n" "OPTIONAL FIELDS:"
             for field_name in "${!custom_fields[@]}"; do
@@ -417,7 +417,7 @@ edit_peer_guided() {
                 fi
                 ;;
             "Remove Custom Field")
-                if [ ${#custom_fields[@]} -eq 0 ]; then
+                if [ ${#custom_fields[@]:-0} -eq 0 ]; then
                     echo
                     print_warning "No custom fields to remove"
                     sleep 1
