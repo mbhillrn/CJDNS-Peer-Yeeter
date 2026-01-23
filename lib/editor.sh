@@ -337,7 +337,7 @@ config_editor_menu() {
         echo
 
         local choice
-        read -p "Enter choice: " choice
+        read -p "Enter choice: " choice < /dev/tty
 
         case "$choice" in
             1|2|3|4|5|6|7)

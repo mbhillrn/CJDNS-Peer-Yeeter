@@ -61,7 +61,7 @@ ask_yes_no() {
     local response
 
     while true; do
-        read -p "$prompt (y/n): " -r response
+        read -p "$prompt (y/n): " -r response < /dev/tty
         case "$response" in
             [Yy]|[Yy][Ee][Ss])
                 return 0
@@ -93,7 +93,7 @@ ask_selection() {
     done
 
     while true; do
-        read -p "Enter selection (1-${#options[@]}): " -r selection
+        read -p "Enter selection (1-${#options[@]}): " -r selection < /dev/tty
 
         if [[ "$selection" =~ ^[0-9]+$ ]] && [ "$selection" -ge 1 ] && [ "$selection" -le ${#options[@]} ]; then
             echo "${options[$((selection-1))]}"
@@ -111,11 +111,11 @@ ask_input() {
     local response
 
     if [ -n "$default" ]; then
-        read -p "$prompt [$default]: " -r response
+        read -p "$prompt [$default]: " -r response < /dev/tty
         echo "${response:-$default}"
     else
         while true; do
-            read -p "$prompt: " -r response
+            read -p "$prompt: " -r response < /dev/tty
             if [ -n "$response" ]; then
                 echo "$response"
                 return 0

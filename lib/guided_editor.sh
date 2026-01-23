@@ -600,7 +600,7 @@ guided_config_editor() {
         echo
 
         local choice
-        read -p "Enter choice: " choice
+        read -p "Enter choice: " choice < /dev/tty
 
         case "$choice" in
             1) add_peer_guided ;;

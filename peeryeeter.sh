@@ -352,7 +352,7 @@ peer_adding_wizard() {
 
     local protocol
     while true; do
-        read -p "Enter selection (4/6/B/0): " -r protocol
+        read -p "Enter selection (4/6/B/0): " -r protocol < /dev/tty
         case "$protocol" in
             4|[Ii][Pp][Vv]4)
                 protocol="ipv4"
@@ -605,7 +605,7 @@ wizard_select_and_add() {
 
     local selection
     while true; do
-        read -p "Enter selection: " -r selection
+        read -p "Enter selection: " -r selection < /dev/tty < /dev/tty
         case "$selection" in
             [Aa])
                 wizard_add_peers "$active_ipv4" "$active_ipv6" "$updates_ipv4" "$updates_ipv6" \
@@ -1202,7 +1202,7 @@ remove_peers_menu() {
     echo
 
     local selection
-    read -p "Selection: " -r selection
+    read -p "Selection: " -r selection < /dev/tty
 
     if [ -z "$selection" ]; then
         print_info "Cancelled"
@@ -1411,7 +1411,7 @@ configuration_settings_menu() {
         echo
 
         local choice
-        read -p "Enter choice: " choice
+        read -p "Enter choice: " choice < /dev/tty < /dev/tty
 
         case "$choice" in
             1) change_config_location ;;
@@ -1466,7 +1466,7 @@ peer_sources_menu() {
         echo
 
         local choice
-        read -p "Enter choice: " choice
+        read -p "Enter choice: " choice < /dev/tty < /dev/tty
 
         case "$choice" in
             1) toggle_peer_source_menu ;;
@@ -1494,7 +1494,7 @@ database_management_menu() {
         echo
 
         local choice
-        read -p "Enter choice: " choice
+        read -p "Enter choice: " choice < /dev/tty < /dev/tty
 
         case "$choice" in
             1) database_backup_menu ;;
@@ -1533,7 +1533,7 @@ file_management_menu() {
         echo
 
         local choice
-        read -p "Enter choice: " choice
+        read -p "Enter choice: " choice < /dev/tty < /dev/tty
 
         case "$choice" in
             1) interactive_file_deletion "backup" ;;
@@ -1565,7 +1565,7 @@ maintenance_menu() {
         echo
 
         local choice
-        read -p "Enter choice: " choice
+        read -p "Enter choice: " choice < /dev/tty < /dev/tty
 
         case "$choice" in
             1) configuration_settings_menu ;;
@@ -1663,7 +1663,7 @@ toggle_peer_source_menu() {
     echo
 
     local choice
-    read -p "Enter choice: " choice
+    read -p "Enter choice: " choice < /dev/tty
 
     if [ "$choice" = "0" ] || [ "$choice" -lt 1 ] || [ "$choice" -ge $count ]; then
         return
@@ -1692,7 +1692,7 @@ add_peer_source_menu() {
 
     # Get source name
     echo "Enter source name (e.g., 'my-peers'):"
-    read -p "> " name
+    read -p "> " name < /dev/tty
     [ -z "$name" ] && return
 
     # Get source type
@@ -1702,7 +1702,7 @@ add_peer_source_menu() {
     echo "  2) Direct JSON URL"
     echo "  0) Cancel"
     echo
-    read -p "Enter choice: " type_choice
+    read -p "Enter choice: " type_choice < /dev/tty
 
     local type
     case "$type_choice" in
@@ -1718,7 +1718,7 @@ add_peer_source_menu() {
     else
         echo "Enter direct JSON URL:"
     fi
-    read -p "> " url
+    read -p "> " url < /dev/tty
     [ -z "$url" ] && return
 
     # Add to sources
@@ -1758,7 +1758,7 @@ remove_peer_source_menu() {
     echo
 
     local choice
-    read -p "Enter choice: " choice
+    read -p "Enter choice: " choice < /dev/tty
 
     if [ "$choice" = "0" ] || [ "$choice" -lt 1 ] || [ "$choice" -ge $count ]; then
         return
@@ -1909,7 +1909,7 @@ database_restore_menu() {
 
     local choice
     while true; do
-        read -p "Select backup to restore (0-${#backups[@]}): " choice
+        read -p "Select backup to restore (0-${#backups[@]}): " choice < /dev/tty
 
         if [ "$choice" = "0" ]; then
             print_info "Cancelled"
@@ -2008,7 +2008,7 @@ import_peers_menu() {
 
         local choice
         while true; do
-            read -p "Select file to import (0-${#exports[@]}, or 'q' to quit): " choice
+            read -p "Select file to import (0-${#exports[@]}, or 'q' to quit): " choice < /dev/tty
 
             if [[ "$choice" == "q" ]] || [[ "$choice" == "Q" ]]; then
                 return
@@ -2029,7 +2029,7 @@ import_peers_menu() {
         echo "Enter path to JSON file (example: $export_dir/ipv4_peers_*.json)"
         echo "or press Ctrl+C to cancel"
         echo
-        read -p "File path: " -r file_path
+        read -p "File path: " -r file_path < /dev/tty
 
         if [ -z "$file_path" ]; then
             print_error "No file specified"
@@ -2149,7 +2149,7 @@ export_peers_menu() {
     echo
 
     local selection
-    read -p "Enter selection: " -r selection
+    read -p "Enter selection: " -r selection < /dev/tty
 
     # Handle exit
     if [[ "$selection" == "0" ]] || [[ "$selection" =~ ^[Qq]$ ]]; then
@@ -2259,7 +2259,7 @@ restore_config_menu() {
 
     local choice
     while true; do
-        read -p "Select backup to restore (0-${#backups[@]}): " choice
+        read -p "Select backup to restore (0-${#backups[@]}): " choice < /dev/tty
 
         if [ "$choice" = "0" ]; then
             return
@@ -2357,7 +2357,7 @@ main() {
         show_menu
 
         local choice
-        read -p "Enter choice: " choice
+        read -p "Enter choice: " choice < /dev/tty < /dev/tty < /dev/tty
 
         case "$choice" in
             1) peer_adding_wizard ;;
