@@ -485,6 +485,12 @@ peer_adding_wizard() {
 
     # Step 5: Selection options
     print_subheader "Step 5: Select Peers to Add"
+    echo
+    echo "Summary:"
+    echo "  • Active IPv4 peers: $active_ipv4_count"
+    echo "  • Active IPv6 peers: $active_ipv6_count"
+    echo "  • Credential updates: $update_ipv4_count IPv4, $update_ipv6_count IPv6"
+    echo
 
     wizard_select_and_add "$active_ipv4" "$active_ipv6" "$inactive_ipv4" "$inactive_ipv6" \
                           "$updates_ipv4" "$updates_ipv6" \
@@ -681,7 +687,10 @@ wizard_add_peers() {
     fi
 
     # Add peers
-    print_subheader "Adding Peers"
+    print_subheader "Adding Peers to Config"
+    echo
+    print_info "Adding $count_ipv4 IPv4 peers and $count_ipv6 IPv6 peers to config..."
+    echo
 
     local temp_config="$WORK_DIR/config.tmp"
     cp "$CJDNS_CONFIG" "$temp_config"
@@ -689,53 +698,102 @@ wizard_add_peers() {
     local total_added=0
 
     if [ "$count_ipv4" -gt 0 ]; then
+        echo -n "Adding IPv4 peers... "
         if add_peers_to_config "$temp_config" "$peers_ipv4" 0 "$temp_config.new"; then
             mv "$temp_config.new" "$temp_config"
-            print_success "Added $count_ipv4 IPv4 peers"
+            echo -e "${GREEN}✓${NC}"
+            print_success "Added $count_ipv4 IPv4 peers to config"
             total_added=$((total_added + count_ipv4))
         else
+            echo -e "${RED}✗${NC}"
             print_error "Failed to add IPv4 peers"
+            echo
+            print_info "Your config file was NOT modified (backup is safe at: $backup)"
+            echo
+            read -p "Press Enter to continue..."
             return
         fi
     fi
 
     if [ "$count_ipv6" -gt 0 ]; then
+        echo -n "Adding IPv6 peers... "
         if add_peers_to_config "$temp_config" "$peers_ipv6" 1 "$temp_config.new"; then
             mv "$temp_config.new" "$temp_config"
-            print_success "Added $count_ipv6 IPv6 peers"
+            echo -e "${GREEN}✓${NC}"
+            print_success "Added $count_ipv6 IPv6 peers to config"
             total_added=$((total_added + count_ipv6))
         else
+            echo -e "${RED}✗${NC}"
             print_error "Failed to add IPv6 peers"
+            echo
+            print_info "Your config file was NOT modified (backup is safe at: $backup)"
+            echo
+            read -p "Press Enter to continue..."
             return
         fi
     fi
 
     # Apply updates
     if [ "$update_ipv4_count" -gt 0 ]; then
+        echo -n "Applying IPv4 credential updates... "
         if apply_peer_updates "$temp_config" "$updates_ipv4" 0 "$temp_config.new"; then
             mv "$temp_config.new" "$temp_config"
+            echo -e "${GREEN}✓${NC}"
             print_success "Updated $update_ipv4_count IPv4 peer credentials"
+        else
+            echo -e "${RED}✗${NC}"
+            print_warning "Failed to apply some IPv4 updates (continuing anyway)"
         fi
     fi
 
     if [ "$update_ipv6_count" -gt 0 ]; then
+        echo -n "Applying IPv6 credential updates... "
         if apply_peer_updates "$temp_config" "$updates_ipv6" 1 "$temp_config.new"; then
             mv "$temp_config.new" "$temp_config"
+            echo -e "${GREEN}✓${NC}"
             print_success "Updated $update_ipv6_count IPv6 peer credentials"
+        else
+            echo -e "${RED}✗${NC}"
+            print_warning "Failed to apply some IPv6 updates (continuing anyway)"
         fi
     fi
 
     # Validate and save
+    echo
+    echo -n "Validating new config file... "
     if validate_config "$temp_config"; then
+        echo -e "${GREEN}✓${NC}"
+        echo
         cp "$temp_config" "$CJDNS_CONFIG"
-        print_success "Config updated successfully! Added $total_added peers."
+        echo
+        echo "═══════════════════════════════════════════════════════════════"
+        print_success "SUCCESS! Config updated successfully!"
+        echo "═══════════════════════════════════════════════════════════════"
+        echo
+        echo "Summary of changes:"
+        echo "  • Added $total_added new peers"
+        echo "  • Updated $((update_ipv4_count + update_ipv6_count)) peer credentials"
+        echo "  • Backup saved at: $backup"
+        echo
 
         if ask_yes_no "Restart cjdns service now to apply changes?"; then
             restart_service
+        else
+            echo
+            print_info "Remember to restart cjdns manually to apply these changes:"
+            echo "  sudo systemctl restart ${CJDNS_SERVICE:-cjdns}"
         fi
     else
-        print_error "Config validation failed - changes NOT applied"
-        echo "Backup is safe at: $backup"
+        echo -e "${RED}✗${NC}"
+        echo
+        print_error "Config validation FAILED - changes NOT applied"
+        echo
+        print_info "Your original config is safe and unchanged"
+        print_info "Backup is available at: $backup"
+        echo
+        echo "This usually means:"
+        echo "  • Invalid JSON was generated (please report this as a bug)"
+        echo "  • Your config file has structural issues"
     fi
 }
 
