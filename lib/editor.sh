@@ -327,6 +327,12 @@ config_editor_menu() {
         echo "6) IPv6 Interface Settings (bind, beacon)"
         echo "7) Router Section (DNS seeds, tunnels, publicPeer)"
         echo "8) Full Config (edit entire file - ADVANCED)"
+
+        # Show fx option if available
+        if command -v fx &>/dev/null; then
+            echo "9) Interactive JSON Editor (fx) - RECOMMENDED"
+        fi
+
         echo "0) Back to Main Menu"
         echo
 
@@ -335,16 +341,6 @@ config_editor_menu() {
 
         case "$choice" in
             1|2|3|4|5|6|7)
-                # Create backup first
-                local backup
-                if backup=$(backup_config "$CJDNS_CONFIG"); then
-                    print_success "Backup created: $backup"
-                else
-                    print_error "Failed to create backup"
-                    sleep 2
-                    continue
-                fi
-
                 local temp_config="$WORK_DIR/config_new.json"
 
                 case "$choice" in
@@ -359,11 +355,27 @@ config_editor_menu() {
 
                 if [ $? -eq 0 ]; then
                     if [ -f "$temp_config" ]; then
-                        cp "$temp_config" "$CJDNS_CONFIG"
-                        print_success "Config file updated!"
+                        echo
+                        if ask_yes_no "Save changes to config file?"; then
+                            # Create backup now, after confirming save
+                            echo
+                            if ask_yes_no "Create backup before saving?"; then
+                                local backup
+                                if backup=$(backup_config "$CJDNS_CONFIG"); then
+                                    print_success "Backup created: $backup"
+                                else
+                                    print_warning "Backup failed, but continuing with save"
+                                fi
+                            fi
 
-                        if ask_yes_no "Restart cjdns service now?"; then
-                            restart_service
+                            cp "$temp_config" "$CJDNS_CONFIG"
+                            print_success "Config file updated!"
+
+                            if ask_yes_no "Restart cjdns service now?"; then
+                                restart_service
+                            fi
+                        else
+                            print_info "Changes discarded"
                         fi
                     fi
                 fi
@@ -379,13 +391,18 @@ config_editor_menu() {
                     continue
                 fi
 
+                # Create backup before full config edit for safety
                 local backup
-                if backup=$(backup_config "$CJDNS_CONFIG"); then
-                    print_success "Backup created: $backup"
-                else
-                    print_error "Failed to create backup"
-                    sleep 2
-                    continue
+                echo
+                if ask_yes_no "Create backup before editing?"; then
+                    if backup=$(backup_config "$CJDNS_CONFIG"); then
+                        print_success "Backup created: $backup"
+                    else
+                        print_error "Backup failed"
+                        if ! ask_yes_no "Continue without backup?"; then
+                            continue
+                        fi
+                    fi
                 fi
 
                 local editor=$(get_editor)
@@ -399,6 +416,71 @@ config_editor_menu() {
                 else
                     print_error "Config file is INVALID!"
                     if ask_yes_no "Restore from backup?"; then
+                        cp "$backup" "$CJDNS_CONFIG"
+                        print_success "Config restored from backup"
+                    fi
+                fi
+
+                echo
+                read -p "Press Enter to continue..."
+                ;;
+            9)
+                if ! command -v fx &>/dev/null; then
+                    print_error "fx is not installed"
+                    echo
+                    echo "Install fx with: sudo snap install fx"
+                    echo "Or during initialization, select yes when prompted"
+                    sleep 2
+                    continue
+                fi
+
+                clear
+                print_ascii_header
+                print_bold "Interactive JSON Editor (fx)"
+                echo
+                echo "Navigation Tips:"
+                echo "  • Arrow keys to navigate, Enter to expand/collapse"
+                echo "  • Press 'q' to quit and save changes"
+                echo "  • Press '?' for help"
+                echo
+
+                # Auto-create backup
+                echo "Creating automatic backup..."
+                local backup
+                if backup=$(backup_config "$CJDNS_CONFIG"); then
+                    print_success "Backup created: $backup"
+                else
+                    print_warning "Backup failed, but continuing"
+                fi
+
+                echo
+                echo "Opening fx editor..."
+                sleep 1
+
+                # Open fx with piping to avoid filename parsing issues
+                # Create temp file for editing
+                local temp_fx="/tmp/cjdns_fx_edit_$$.json"
+                cat "$CJDNS_CONFIG" | fx > "$temp_fx"
+
+                # If fx succeeded and file was modified, update config
+                if [ -s "$temp_fx" ]; then
+                    mv "$temp_fx" "$CJDNS_CONFIG"
+                else
+                    rm -f "$temp_fx"
+                    print_warning "No changes made or fx cancelled"
+                fi
+
+                # Validate after editing
+                if validate_config "$CJDNS_CONFIG"; then
+                    print_success "Config file is valid"
+                    echo
+                    if ask_yes_no "Restart cjdns service now?"; then
+                        restart_service
+                    fi
+                else
+                    print_error "Config file is INVALID!"
+                    echo
+                    if [ -n "$backup" ] && ask_yes_no "Restore from backup?"; then
                         cp "$backup" "$CJDNS_CONFIG"
                         print_success "Config restored from backup"
                     fi

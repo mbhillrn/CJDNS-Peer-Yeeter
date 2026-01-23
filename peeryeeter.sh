@@ -26,6 +26,9 @@ source "$SCRIPT_DIR/lib/config.sh"
 source "$SCRIPT_DIR/lib/database.sh"
 source "$SCRIPT_DIR/lib/master_list.sh"
 source "$SCRIPT_DIR/lib/editor.sh"
+source "$SCRIPT_DIR/lib/prerequisites.sh"
+source "$SCRIPT_DIR/lib/interactive.sh"
+source "$SCRIPT_DIR/lib/guided_editor.sh"
 
 # Global variables (will be set during initialization)
 CJDNS_CONFIG=""
@@ -80,6 +83,19 @@ initialize() {
 
     print_success "All required tools found (jq, git, wget, sqlite3)"
 
+    # Check for gum (interactive menu tool)
+    print_subheader "Checking Interactive Tools"
+
+    if ! check_gum; then
+        print_warning "gum not found (required for interactive menus)"
+        echo
+        if ! check_prerequisites; then
+            exit 1
+        fi
+    else
+        print_success "gum found (interactive menus enabled)"
+    fi
+
     # Check cjdnstool
     print_subheader "Checking cjdnstool"
 
@@ -98,51 +114,108 @@ initialize() {
     print_subheader "Detecting CJDNS Configuration"
 
     local detection_result
+    local service_detected=0
     if detection_result=$(detect_cjdns_service); then
         CJDNS_SERVICE=$(echo "$detection_result" | cut -d'|' -f1)
         CJDNS_CONFIG=$(echo "$detection_result" | cut -d'|' -f2)
 
         print_success "Detected cjdns service: $CJDNS_SERVICE"
         print_success "Detected config file: $CJDNS_CONFIG"
+        echo
 
-        if ! ask_yes_no "Is this the correct config file?"; then
+        if ! ask_yes_no "Are these settings correct?"; then
             CJDNS_CONFIG=""
             CJDNS_SERVICE=""
+        else
+            service_detected=1
         fi
     fi
 
-    # Fallback: list available configs
+    # Manual configuration if auto-detection failed or was rejected
     if [ -z "$CJDNS_CONFIG" ]; then
         print_warning "Auto-detection failed or was rejected"
-        print_subheader "Available cjdns config files"
+        print_subheader "Manual Configuration"
+        echo
 
+        # Prompt for service name
+        echo "CJDNS Service Name (EXAMPLE: cjdns.service)"
+        echo "If your service has a different name or you don't have a systemd service,"
+        echo "you can enter it here or leave blank to continue without service management."
+        echo
+        CJDNS_SERVICE=$(ask_input "Service name (or press Enter to skip)" "")
+
+        # Validate service if provided
+        if [ -n "$CJDNS_SERVICE" ]; then
+            echo
+            print_info "Validating service: $CJDNS_SERVICE"
+            if systemctl list-unit-files "$CJDNS_SERVICE" &>/dev/null; then
+                print_success "Service found: $CJDNS_SERVICE"
+                service_detected=1
+            else
+                print_warning "Service '$CJDNS_SERVICE' not found on this system"
+                echo
+                if ask_yes_no "Continue without service management? (You'll need to restart cjdns manually)"; then
+                    print_info "Continuing without service management"
+                    CJDNS_SERVICE=""
+                else
+                    if ask_yes_no "Try a different service name?"; then
+                        CJDNS_SERVICE=$(ask_input "Service name")
+                        if systemctl list-unit-files "$CJDNS_SERVICE" &>/dev/null; then
+                            print_success "Service found: $CJDNS_SERVICE"
+                            service_detected=1
+                        else
+                            print_error "Service still not found. Continuing without service management."
+                            CJDNS_SERVICE=""
+                        fi
+                    else
+                        print_info "Continuing without service management"
+                        CJDNS_SERVICE=""
+                    fi
+                fi
+            fi
+        fi
+
+        # Prompt for config file location
+        echo
+        echo "Config file location (ex. /etc/cjdroute_PORT.conf):"
+        echo "This is REQUIRED for PeerYeeter to function."
+        echo
+
+        # Try to find configs as suggestions
         local configs
         mapfile -t configs < <(list_cjdns_configs)
 
-        if [ ${#configs[@]} -eq 0 ]; then
-            print_error "No cjdns config files found in /etc/"
+        if [ ${#configs[@]} -gt 0 ]; then
+            print_info "Found these config files:"
+            for cfg in "${configs[@]}"; do
+                echo "  - $cfg"
+            done
             echo
-            if ask_yes_no "Would you like to specify a custom config path?"; then
-                CJDNS_CONFIG=$(ask_input "Enter full path to cjdns config file")
-                if [ ! -f "$CJDNS_CONFIG" ]; then
-                    print_error "File not found: $CJDNS_CONFIG"
-                    exit 1
-                fi
-            else
-                exit 1
-            fi
-        else
-            if [ ${#configs[@]} -eq 1 ]; then
-                CJDNS_CONFIG="${configs[0]}"
-                print_info "Found one config file: $CJDNS_CONFIG"
-                if ! ask_yes_no "Use this config file?"; then
-                    exit 1
-                fi
-            else
-                print_info "Found multiple config files:"
-                CJDNS_CONFIG=$(ask_selection "Select your config file:" "${configs[@]}")
-            fi
         fi
+
+        while true; do
+            CJDNS_CONFIG=$(ask_input "Config file path")
+
+            # Validate config file
+            if [ ! -f "$CJDNS_CONFIG" ]; then
+                print_error "File not found: $CJDNS_CONFIG"
+                echo
+                if ask_yes_no "Try again?"; then
+                    continue
+                else
+                    print_error "Cannot proceed without a valid config file"
+                    exit 1
+                fi
+            else
+                break
+            fi
+        done
+    fi
+
+    # Warn if service management is disabled
+    if [ -z "$CJDNS_SERVICE" ] && [ "$service_detected" -eq 0 ]; then
+        echo
+        print_warning "Service management disabled - you'll need to restart cjdns manually after config changes"
     fi
 
     # Validate config file
@@ -184,8 +257,8 @@ initialize() {
         exit 1
     fi
 
-    # Initialize database and master list
-    print_subheader "Initializing Database & Master List"
+    # Initialize database and local address database
+    print_subheader "Initializing Database & Local Address Database"
 
     # Create backup directory with proper permissions
     if ! mkdir -p "$BACKUP_DIR" 2>/dev/null; then
@@ -249,12 +322,12 @@ show_menu() {
     echo "Config: $CJDNS_CONFIG"
     echo "Backup: $BACKUP_DIR"
     echo
-    echo "1) Peer Adding Wizard (Recommended)"
-    echo "2) Discover & Preview Peers"
-    echo "3) Edit Config File"
-    echo "4) Remove Peers"
-    echo "5) View Peer Status"
-    echo "6) Maintenance"
+    echo "1) 🧙 Peer Adding Wizard (Recommended)"
+    echo "2) 🔍 Discover & Preview Peers"
+    echo "3) ✏️  Edit Config File"
+    echo "4) 🗑️  View Status & Remove Peers"
+    echo "5) 📊 View Peer Status"
+    echo "6) ⚙️  Maintenance & Settings"
     echo "0) Exit"
     echo
 }
@@ -274,11 +347,12 @@ peer_adding_wizard() {
     echo "  4) IPv4 only"
     echo "  6) IPv6 only"
     echo "  B) Both IPv4 and IPv6"
+    echo "  0) Cancel and return to main menu"
     echo
 
     local protocol
     while true; do
-        read -p "Enter selection (4/6/B): " -r protocol
+        read -p "Enter selection (4/6/B/0): " -r protocol
         case "$protocol" in
             4|[Ii][Pp][Vv]4)
                 protocol="ipv4"
@@ -295,22 +369,28 @@ peer_adding_wizard() {
                 print_success "Both IPv4 and IPv6 selected"
                 break
                 ;;
+            0|[Cc]|[Cc][Aa][Nn][Cc][Ee][Ll])
+                print_info "Cancelled"
+                echo
+                read -p "Press Enter to continue..."
+                return
+                ;;
             *)
-                print_error "Please enter 4, 6, or B"
+                print_error "Please enter 4, 6, B, or 0"
                 ;;
         esac
     done
     echo
 
-    # Step 2: Update master list
-    print_subheader "Step 2: Updating Master Peer List"
+    # Step 2: Update local address database
+    print_subheader "Step 2: Updating Local Address Database"
     print_info "Fetching latest peers from online sources..."
 
     local result=$(update_master_list)
     local master_ipv4=$(echo "$result" | cut -d'|' -f1)
     local master_ipv6=$(echo "$result" | cut -d'|' -f2)
 
-    print_success "Master list updated: $master_ipv4 IPv4, $master_ipv6 IPv6 peers"
+    print_success "Local Address Database updated: $master_ipv4 IPv4, $master_ipv6 IPv6 peers"
     echo
 
     # Step 3: Filter for new peers
@@ -323,7 +403,7 @@ peer_adding_wizard() {
     local updates_ipv4="$WORK_DIR/updates_ipv4.json"
     local updates_ipv6="$WORK_DIR/updates_ipv6.json"
 
-    # Get peers from master list
+    # Get peers from local address database
     if [ "$protocol" = "ipv4" ] || [ "$protocol" = "both" ]; then
         get_master_peers "ipv4" > "$discovered_ipv4"
     else
@@ -748,17 +828,20 @@ discover_preview() {
     print_info "Updating locally stored address list and analyzing available peers"
     echo
 
-    # Update master list
-    print_subheader "Updating Locally Stored Address List"
-    local result=$(update_master_list)
-    local local_ipv4=$(echo "$result" | cut -d'|' -f1)
-    local local_ipv6=$(echo "$result" | cut -d'|' -f2)
-    print_success "Locally stored address list: $local_ipv4 IPv4, $local_ipv6 IPv6"
+    # Update local address database
+    print_subheader "Updating Local Address Database"
+    echo -n "Fetching from peer sources... "
+    local result=$(update_master_list 2>&1)
+    local local_ipv4=$(echo "$result" | tail -1 | cut -d'|' -f1)
+    local local_ipv6=$(echo "$result" | tail -1 | cut -d'|' -f2)
+    print_success "Done"
+    echo
+    echo "  • Local Address Database: $local_ipv4 IPv4, $local_ipv6 IPv6 peers"
 
     # Get current config counts
     local config_ipv4=$(get_peer_count "$CJDNS_CONFIG" 0)
     local config_ipv6=$(get_peer_count "$CJDNS_CONFIG" 1)
-    print_success "CJDNS config file: $config_ipv4 IPv4, $config_ipv6 IPv6 peers"
+    echo "  • CJDNS Config File: $config_ipv4 IPv4, $config_ipv6 IPv6 peers"
     echo
 
     # Filter for new peers
@@ -773,8 +856,8 @@ discover_preview() {
     get_master_peers "ipv4" > "$all_ipv4"
     get_master_peers "ipv6" > "$all_ipv6"
 
-    local new_counts_ipv4=$(smart_duplicate_check "$all_ipv4" "$CJDNS_CONFIG" 0 "$new_ipv4" "$updates_ipv4")
-    local new_counts_ipv6=$(smart_duplicate_check "$all_ipv6" "$CJDNS_CONFIG" 1 "$new_ipv6" "$updates_ipv6")
+    local new_counts_ipv4=$(smart_duplicate_check "$all_ipv4" "$CJDNS_CONFIG" 0 "$new_ipv4" "$updates_ipv4" 0)
+    local new_counts_ipv6=$(smart_duplicate_check "$all_ipv6" "$CJDNS_CONFIG" 1 "$new_ipv6" "$updates_ipv6" 0)
 
     local new_ipv4_count=$(echo "$new_counts_ipv4" | cut -d'|' -f1)
     local new_ipv6_count=$(echo "$new_counts_ipv6" | cut -d'|' -f1)
@@ -835,18 +918,24 @@ discover_preview() {
 
             echo
             print_success "Pingable peers not in config: $pingable_ipv4_count IPv4, $pingable_ipv6_count IPv6"
+
+            # Show pingable peers details if requested
+            if [ "$pingable_ipv4_count" -gt 0 ] || [ "$pingable_ipv6_count" -gt 0 ]; then
+                echo
+                if ask_yes_no "View all pingable peers?"; then
+                    if [ "$pingable_ipv4_count" -gt 0 ]; then
+                        print_subheader "Pingable IPv4 Peers"
+                        show_peer_details "$pingable_ipv4" 99999
+                    fi
+
+                    if [ "$pingable_ipv6_count" -gt 0 ]; then
+                        echo
+                        print_subheader "Pingable IPv6 Peers"
+                        show_peer_details "$pingable_ipv6" 99999
+                    fi
+                fi
+            fi
         fi
-    fi
-
-    # Show available peers details if requested
-    echo
-    if ask_yes_no "View all peers from locally stored address list?"; then
-        print_subheader "All IPv4 Peers in Local Database"
-        show_peer_details "$all_ipv4" 99999
-
-        echo
-        print_subheader "All IPv6 Peers in Local Database"
-        show_peer_details "$all_ipv6" 99999
     fi
 
     echo
@@ -970,18 +1059,30 @@ remove_peers_menu() {
         update_peer_state "$address" "$state"
     done < "$peer_states"
 
-    # Get all peers sorted by quality
-    print_info "Loading peer quality data..."
+    # Get all peers from BOTH interfaces in config
+    print_info "Loading peers from config..."
     echo
 
-    local all_peers=$(get_all_peers_by_quality)
+    declare -a all_config_peers
+    # Get IPv4 peers
+    while IFS= read -r addr; do
+        [ -n "$addr" ] && all_config_peers+=("$addr")
+    done < <(jq -r '.interfaces.UDPInterface[0].connectTo // {} | keys[]' "$CJDNS_CONFIG" 2>/dev/null)
 
-    if [ -z "$all_peers" ]; then
-        print_warning "No peers found in database"
+    # Get IPv6 peers
+    while IFS= read -r addr; do
+        [ -n "$addr" ] && all_config_peers+=("$addr")
+    done < <(jq -r '.interfaces.UDPInterface[1].connectTo // {} | keys[]' "$CJDNS_CONFIG" 2>/dev/null)
+
+    if [ ${#all_config_peers[@]} -eq 0 ]; then
+        print_warning "No peers found in config"
         echo
         read -p "Press Enter to continue..."
         return
     fi
+
+    # Get quality data from database
+    local all_peers=$(get_all_peers_by_quality)
 
     # Build arrays for display
     declare -a peer_addresses
@@ -992,6 +1093,7 @@ remove_peers_menu() {
     echo "Est.=Established count, Unr.=Unresponsive count"
     echo
 
+    # Display peers with quality data first (sorted by quality)
     while IFS='|' read -r address state quality est_count unr_count first_seen last_change consecutive; do
         [ -z "$address" ] && continue
 
@@ -1014,6 +1116,26 @@ remove_peers_menu() {
 
         peer_displays+=("$address ($state)")
     done <<< "$all_peers"
+
+    # Display peers from config that aren't in database yet (not yet checked)
+    for config_addr in "${all_config_peers[@]}"; do
+        # Check if this address was already displayed
+        local already_shown=false
+        for shown_addr in "${peer_addresses[@]}"; do
+            if [ "$config_addr" = "$shown_addr" ]; then
+                already_shown=true
+                break
+            fi
+        done
+
+        if [ "$already_shown" = false ]; then
+            index=$((index + 1))
+            peer_addresses+=("$config_addr")
+            printf "%3d) ${GRAY}○${NC} %-40s Q:%-5s Est:%-3d Unr:%-3d ${GRAY}(Awaiting first check)${NC}\n" \
+                "$index" "$config_addr" "N/A" "0" "0"
+            peer_displays+=("$config_addr (AWAITING CHECK)")
+        fi
+    done
 
     echo
     print_info "Enter peer numbers to remove (space or comma-separated, e.g., '1 3 5' or '1,3,5')"
@@ -1162,28 +1284,210 @@ view_peer_status() {
     if ask_yes_no "Show detailed list with quality scores and timestamps?"; then
         print_subheader "Peer Details"
 
-        # Get all peers with full details from database
-        local all_peers=$(get_all_peers_by_quality)
+        # Get all peers from config (IPv4 and IPv6)
+        declare -a all_config_peers
+        # IPv4 peers
+        while IFS= read -r addr; do
+            [ -n "$addr" ] && all_config_peers+=("$addr")
+        done < <(jq -r '.interfaces.UDPInterface[0].connectTo // {} | keys[]' "$CJDNS_CONFIG" 2>/dev/null)
 
-        # Display each peer
+        # IPv6 peers
+        while IFS= read -r addr; do
+            [ -n "$addr" ] && all_config_peers+=("$addr")
+        done < <(jq -r '.interfaces.UDPInterface[1].connectTo // {} | keys[]' "$CJDNS_CONFIG" 2>/dev/null)
+
+        # Get all peers with full details from database
+        local all_db_peers=$(get_all_peers_by_quality)
+
+        # Create associative array for quick lookup
+        declare -A db_peers
         while IFS='|' read -r address state quality est_count unr_count first_seen last_change consecutive; do
             [ -z "$address" ] && continue
+            db_peers["$address"]="$state|$quality|$est_count|$unr_count|$last_change|$consecutive"
+        done <<< "$all_db_peers"
 
-            local quality_display=$(printf "%.0f%%" "$quality")
-            local time_in_state=$(time_since "$last_change")
+        # Display each peer from config
+        for config_addr in "${all_config_peers[@]}"; do
+            if [ -n "${db_peers[$config_addr]:-}" ]; then
+                # Peer is in database - show full info
+                IFS='|' read -r state quality est_count unr_count last_change consecutive <<< "${db_peers[$config_addr]}"
+                local quality_display=$(printf "%.0f%%" "$quality")
+                local time_in_state=$(time_since "$last_change")
 
-            if [ "$state" = "ESTABLISHED" ]; then
-                print_success "$state: $address (Quality: $quality_display, Established $time_in_state)"
-            elif [ "$state" = "UNRESPONSIVE" ]; then
-                print_error "$state: $address (Quality: $quality_display, Unresponsive $time_in_state, Checked $consecutive times)"
+                if [ "$state" = "ESTABLISHED" ]; then
+                    print_success "$state: $config_addr (Quality: $quality_display, Established $time_in_state)"
+                elif [ "$state" = "UNRESPONSIVE" ]; then
+                    print_error "$state: $config_addr (Quality: $quality_display, Unresponsive $time_in_state, Checked $consecutive times)"
+                else
+                    print_warning "$state: $config_addr (Quality: $quality_display, In state $time_in_state)"
+                fi
             else
-                print_warning "$state: $address (Quality: $quality_display, In state $time_in_state)"
+                # Peer not in database yet - show as awaiting check
+                echo -e "${GRAY}○ AWAITING CHECK: $config_addr (Not yet tested - will be checked on next service restart)${NC}"
             fi
-        done <<< "$all_peers"
+        done
     fi
 
     echo
     read -p "Press Enter to continue..."
+}
+
+# Configuration Settings Submenu
+configuration_settings_menu() {
+    while true; do
+        clear
+        print_ascii_header
+        print_header "Configuration Settings"
+
+        echo "Current Configuration:"
+        echo "  Config File: $CJDNS_CONFIG"
+        echo "  Service: ${CJDNS_SERVICE:-Disabled}"
+        echo "  Backup Directory: $BACKUP_DIR"
+        echo
+
+        echo "1) Change Config File Location"
+        echo "2) Change Service Name"
+        echo "3) Change Backup Directory (with migration)"
+        echo
+        echo "0) Back to Maintenance Menu"
+        echo
+
+        local choice
+        read -p "Enter choice: " choice
+
+        case "$choice" in
+            1) change_config_location ;;
+            2) change_service_name ;;
+            3) change_backup_directory ;;
+            0) return ;;
+            *) print_error "Invalid choice"; sleep 1 ;;
+        esac
+    done
+}
+
+# Peer Sources Management Submenu
+peer_sources_menu() {
+    while true; do
+        clear
+        print_ascii_header
+        print_header "Peer Sources Management"
+
+        # Load and display sources
+        echo "Current Peer Sources:"
+        echo
+        local sources_json=$(jq -c '.sources[]' "$PEER_SOURCES" 2>/dev/null)
+        local count=0
+        while IFS= read -r source; do
+            [ -z "$source" ] && continue
+            local name=$(echo "$source" | jq -r '.name')
+            local enabled=$(echo "$source" | jq -r '.enabled')
+            local type=$(echo "$source" | jq -r '.type')
+
+            local status_icon="✓"
+            local status_text="${GREEN}Enabled${NC}"
+            if [ "$enabled" = "false" ]; then
+                status_icon="✗"
+                status_text="${RED}Disabled${NC}"
+            fi
+
+            echo -e "  $status_icon $name ($type) - $status_text"
+            count=$((count + 1))
+        done <<< "$sources_json"
+
+        if [ $count -eq 0 ]; then
+            echo "  No sources configured"
+        fi
+        echo
+
+        echo "1) Enable/Disable a Source"
+        echo "2) Add New Source"
+        echo "3) Remove Source"
+        echo "4) Reset Local Address Database"
+        echo
+        echo "0) Back to Maintenance Menu"
+        echo
+
+        local choice
+        read -p "Enter choice: " choice
+
+        case "$choice" in
+            1) toggle_peer_source_menu ;;
+            2) add_peer_source_menu ;;
+            3) remove_peer_source_menu ;;
+            4) reset_master_list_menu ;;
+            0) return ;;
+            *) print_error "Invalid choice"; sleep 1 ;;
+        esac
+    done
+}
+
+# Database Management Submenu
+database_management_menu() {
+    while true; do
+        clear
+        print_ascii_header
+        print_header "Database Management"
+
+        echo "1) Backup Database"
+        echo "2) Restore Database from Backup"
+        echo "3) Reset Database (Clear all peer tracking data)"
+        echo
+        echo "0) Back to Maintenance Menu"
+        echo
+
+        local choice
+        read -p "Enter choice: " choice
+
+        case "$choice" in
+            1) database_backup_menu ;;
+            2) database_restore_menu ;;
+            3) reset_database_menu ;;
+            0) return ;;
+            *) print_error "Invalid choice"; sleep 1 ;;
+        esac
+    done
+}
+
+# File Management Submenu
+file_management_menu() {
+    while true; do
+        clear
+        print_ascii_header
+        print_header "File Management"
+
+        # Count files
+        local backup_count=$(ls -1 "$BACKUP_DIR"/cjdroute_backup_*.conf 2>/dev/null | wc -l)
+        local export_count=$(ls -1 "$BACKUP_DIR"/exported_peers/*.json 2>/dev/null | wc -l)
+
+        echo "Current Files:"
+        echo "  Config Backups: $backup_count"
+        echo "  Exported Peer Files: $export_count"
+        echo
+
+        echo "1) Delete Old Config Backups (multi-select)"
+        echo "2) Delete Exported Peer Files (multi-select)"
+        echo "3) Import Peers from File"
+        echo "4) Export Peers to File"
+        echo "5) Backup Config File"
+        echo "6) Restore Config from Backup"
+        echo
+        echo "0) Back to Maintenance Menu"
+        echo
+
+        local choice
+        read -p "Enter choice: " choice
+
+        case "$choice" in
+            1) interactive_file_deletion "backup" ;;
+            2) interactive_file_deletion "export" ;;
+            3) import_peers_menu ;;
+            4) export_peers_menu ;;
+            5) backup_config_menu ;;
+            6) restore_config_menu ;;
+            0) return ;;
+            *) print_error "Invalid choice"; sleep 1 ;;
+        esac
+    done
 }
 
 # Maintenance Menu
@@ -1191,17 +1495,14 @@ maintenance_menu() {
     while true; do
         clear
         print_ascii_header
-        print_header "Maintenance"
+        print_header "Maintenance & Settings"
 
-        echo "1) Show Directories & Config Info"
-        echo "2) Reset Master Peer List"
-        echo "3) Manage Peer Sources"
-        echo "4) Reset Database"
-        echo "5) Import Peers from File"
-        echo "6) Export Peers to File"
-        echo "7) Backup Config"
-        echo "8) Restore Config"
-        echo "9) Restart cjdns Service"
+        echo "1) ⚙️  Configuration Settings"
+        echo "2) 🌐 Peer Sources Management"
+        echo "3) 💾 Database Management"
+        echo "4) 📁 File Management"
+        echo "5) 🔄 Restart cjdns Service"
+        echo
         echo "0) Back to Main Menu"
         echo
 
@@ -1209,15 +1510,11 @@ maintenance_menu() {
         read -p "Enter choice: " choice
 
         case "$choice" in
-            1) show_directories ;;
-            2) reset_master_list_menu ;;
-            3) manage_sources_menu ;;
-            4) reset_database_menu ;;
-            5) import_peers_menu ;;
-            6) export_peers_menu ;;
-            7) backup_config_menu ;;
-            8) restore_config_menu ;;
-            9) restart_service ;;
+            1) configuration_settings_menu ;;
+            2) peer_sources_menu ;;
+            3) database_management_menu ;;
+            4) file_management_menu ;;
+            5) restart_service ;;
             0) return ;;
             *) print_error "Invalid choice"; sleep 1 ;;
         esac
@@ -1228,62 +1525,230 @@ maintenance_menu() {
 show_directories() {
     clear
     print_ascii_header
-    print_header "Directories & Config Info"
+    print_header "Settings and Configuration"
 
-    echo "Config file:"
-    echo "  $CJDNS_CONFIG"
-    echo
-
-    echo "Backup directory:"
-    echo "  $BACKUP_DIR"
-    echo
-
-    echo "Database:"
-    echo "  $DB_FILE"
-    echo
-
-    echo "Master peer list:"
-    echo "  $MASTER_LIST"
-    echo
-
-    echo "Peer sources:"
-    echo "  $PEER_SOURCES"
-    echo
-
+    # Count various items
     local backup_count=$(ls -1 "$BACKUP_DIR"/cjdroute_backup_*.conf 2>/dev/null | wc -l)
-    echo "Number of backups: $backup_count"
-
+    local export_count=$(ls -1 "$BACKUP_DIR"/exported_peers/*.json 2>/dev/null | wc -l)
     local counts=$(get_master_counts)
     local ipv4_count=$(echo "$counts" | cut -d'|' -f1)
     local ipv6_count=$(echo "$counts" | cut -d'|' -f2)
-    echo "Master list: $ipv4_count IPv4, $ipv6_count IPv6"
+    local service_status="Disabled"
+    if [ -n "$CJDNS_SERVICE" ]; then
+        service_status="$CJDNS_SERVICE"
+    fi
+
+    # Display current settings
+    print_subheader "Current Configuration"
+    echo
+    printf "%-25s %s\n" "CJDNS Config File:" "$CJDNS_CONFIG"
+    printf "%-25s %s\n" "CJDNS Service:" "$service_status"
+    printf "%-25s %s\n" "Backup Directory:" "$BACKUP_DIR"
+    printf "%-25s %s\n" "Database File:" "$DB_FILE"
+    printf "%-25s %s\n" "Local Address DB:" "$MASTER_LIST"
+    printf "%-25s %s\n" "Peer Sources File:" "$PEER_SOURCES"
+    echo
+
+    print_subheader "Storage Statistics"
+    echo
+    printf "%-25s %d\n" "Config Backups:" "$backup_count"
+    printf "%-25s %d\n" "Exported Peer Files:" "$export_count"
+    printf "%-25s %d IPv4, %d IPv6\n" "Local Address DB:" "$ipv4_count" "$ipv6_count"
+    echo
+
+    # Show current config peer counts
+    local config_ipv4=$(get_peer_count "$CJDNS_CONFIG" 0)
+    local config_ipv6=$(get_peer_count "$CJDNS_CONFIG" 1)
+    printf "%-25s %d IPv4, %d IPv6\n" "Peers in Config:" "$config_ipv4" "$config_ipv6"
+    echo
+
+    print_info "Settings management features:"
+    echo "  - Config file location can be changed by re-initializing"
+    echo "  - Backup directory changes: Not yet implemented"
+    echo "  - Service management: Set during initialization"
+    echo
+    print_warning "To change critical settings, restart the application"
 
     echo
     read -p "Press Enter to continue..."
 }
 
-# Reset master peer list
-reset_master_list_menu() {
+# Toggle peer source on/off (menu-based)
+toggle_peer_source_menu() {
     clear
     print_ascii_header
-    print_header "Reset Master Peer List"
+    print_header "Enable/Disable Peer Source"
 
-    print_warning "This will delete the current master list and re-download from all sources"
+    # Load sources and build menu
+    local sources_json=$(jq -c '.sources[]' "$PEER_SOURCES" 2>/dev/null)
+    declare -a source_names
+    declare -a source_statuses
+    local count=1
+
+    echo "Select source to toggle:"
+    echo
+    while IFS= read -r source; do
+        [ -z "$source" ] && continue
+        local name=$(echo "$source" | jq -r '.name')
+        local enabled=$(echo "$source" | jq -r '.enabled')
+        local status="Enabled"
+        [ "$enabled" = "false" ] && status="Disabled"
+
+        echo "  $count) $name [$status]"
+        source_names+=("$name")
+        source_statuses+=("$enabled")
+        count=$((count + 1))
+    done <<< "$sources_json"
+
+    echo
+    echo "  0) Cancel"
     echo
 
-    if ! ask_yes_no "Are you sure you want to reset the master list?"; then
+    local choice
+    read -p "Enter choice: " choice
+
+    if [ "$choice" = "0" ] || [ "$choice" -lt 1 ] || [ "$choice" -ge $count ]; then
         return
     fi
 
-    print_info "Resetting master peer list..."
-    reset_master_list
+    local idx=$((choice - 1))
+    local selected_name="${source_names[$idx]}"
+    local current_state="${source_statuses[$idx]}"
+    local new_state="true"
+    [ "$current_state" = "true" ] && new_state="false"
+
+    jq ".sources |= map(if .name==\"$selected_name\" then .enabled=$new_state else . end)" "$PEER_SOURCES" > "$PEER_SOURCES.tmp"
+    mv "$PEER_SOURCES.tmp" "$PEER_SOURCES"
+
+    echo
+    print_success "Toggled $selected_name to: $new_state"
+    sleep 1
+}
+
+# Add new peer source (menu-based)
+add_peer_source_menu() {
+    clear
+    print_ascii_header
+    print_header "Add New Peer Source"
+    echo
+
+    # Get source name
+    echo "Enter source name (e.g., 'my-peers'):"
+    read -p "> " name
+    [ -z "$name" ] && return
+
+    # Get source type
+    echo
+    echo "Select source type:"
+    echo "  1) GitHub repository"
+    echo "  2) Direct JSON URL"
+    echo "  0) Cancel"
+    echo
+    read -p "Enter choice: " type_choice
+
+    local type
+    case "$type_choice" in
+        1) type="github" ;;
+        2) type="json" ;;
+        *) return ;;
+    esac
+
+    # Get URL
+    echo
+    if [ "$type" = "github" ]; then
+        echo "Enter GitHub repository URL (e.g., https://github.com/user/repo.git):"
+    else
+        echo "Enter direct JSON URL:"
+    fi
+    read -p "> " url
+    [ -z "$url" ] && return
+
+    # Add to sources
+    jq ".sources += [{\"name\": \"$name\", \"type\": \"$type\", \"url\": \"$url\", \"enabled\": true}]" "$PEER_SOURCES" > "$PEER_SOURCES.tmp"
+    mv "$PEER_SOURCES.tmp" "$PEER_SOURCES"
+
+    echo
+    print_success "Added source: $name"
+    sleep 1
+}
+
+# Remove peer source (menu-based)
+remove_peer_source_menu() {
+    clear
+    print_ascii_header
+    print_header "Remove Peer Source"
+    echo
+
+    # Load sources and build menu
+    local sources_json=$(jq -c '.sources[]' "$PEER_SOURCES" 2>/dev/null)
+    declare -a source_names
+    local count=1
+
+    echo "Select source to REMOVE:"
+    echo
+    while IFS= read -r source; do
+        [ -z "$source" ] && continue
+        local name=$(echo "$source" | jq -r '.name')
+
+        echo "  $count) $name"
+        source_names+=("$name")
+        count=$((count + 1))
+    done <<< "$sources_json"
+
+    echo
+    echo "  0) Cancel"
+    echo
+
+    local choice
+    read -p "Enter choice: " choice
+
+    if [ "$choice" = "0" ] || [ "$choice" -lt 1 ] || [ "$choice" -ge $count ]; then
+        return
+    fi
+
+    local idx=$((choice - 1))
+    local selected_name="${source_names[$idx]}"
+
+    echo
+    if ! ask_yes_no "Remove source '$selected_name'?"; then
+        return
+    fi
+
+    jq ".sources |= map(select(.name!=\"$selected_name\"))" "$PEER_SOURCES" > "$PEER_SOURCES.tmp"
+    mv "$PEER_SOURCES.tmp" "$PEER_SOURCES"
+
+    echo
+    print_success "Removed source: $selected_name"
+    sleep 1
+}
+
+# Reset local address database
+reset_master_list_menu() {
+    clear
+    print_ascii_header
+    print_header "Reset Local Address Database"
+
+    print_warning "This will delete the current database and re-download from all sources"
+    echo
+
+    if ! ask_yes_no "Are you sure you want to reset the local address database?"; then
+        return
+    fi
+
+    echo
+    print_working "Resetting local address database..."
+    reset_master_list >/dev/null 2>&1
 
     local counts=$(get_master_counts)
     local ipv4_count=$(echo "$counts" | cut -d'|' -f1)
     local ipv6_count=$(echo "$counts" | cut -d'|' -f2)
 
-    print_success "Master list reset complete!"
-    print_info "New master list: $ipv4_count IPv4, $ipv6_count IPv6"
+    echo
+    print_success "Local Address Database reset complete!"
+    echo
+    echo -e "  ${BOLD}Database Statistics:${NC}"
+    echo -e "    • IPv4 Peers: ${GREEN}${BOLD}$ipv4_count${NC}"
+    echo -e "    • IPv6 Peers: ${GREEN}${BOLD}$ipv6_count${NC}"
 
     echo
     read -p "Press Enter to continue..."
@@ -1323,6 +1788,106 @@ manage_sources_menu() {
 }
 
 # Reset database
+# Database backup menu
+database_backup_menu() {
+    clear
+    print_ascii_header
+    print_header "Backup Database"
+
+    print_info "Create a backup of the peer tracking database"
+    echo
+
+    if ! ask_yes_no "Create a backup of the database?"; then
+        return
+    fi
+
+    local backup
+    if backup=$(backup_database); then
+        print_success "Database backup created successfully"
+        echo
+        echo "Backup location: $backup"
+        echo "Backup size: $(ls -lh "$backup" | awk '{print $5}')"
+    else
+        print_error "Failed to create database backup"
+    fi
+
+    echo
+    read -p "Press Enter to continue..."
+}
+
+# Database restore menu
+database_restore_menu() {
+    clear
+    print_ascii_header
+    print_header "Restore Database from Backup"
+
+    local backup_dir="$BACKUP_DIR/database_backups"
+    echo "Available database backups in $backup_dir:"
+    echo
+
+    # Get backups sorted by modification time (newest first)
+    local backups
+    mapfile -t backups < <(find "$backup_dir" -name "peer_tracking_backup_*.db" -type f -printf '%T@ %p\n' 2>/dev/null | sort -rn | cut -d' ' -f2-)
+
+    if [ ${#backups[@]} -eq 0 ]; then
+        print_warning "No database backups found"
+        echo
+        read -p "Press Enter to continue..."
+        return
+    fi
+
+    # Show backups with numbers (newest first)
+    for i in "${!backups[@]}"; do
+        local backup="${backups[$i]}"
+        local timestamp=$(basename "$backup" | sed 's/peer_tracking_backup_\(.*\)\.db/\1/')
+        local size=$(ls -lh "$backup" | awk '{print $5}')
+        local date_formatted=$(format_timestamp $(stat -c %Y "$backup"))
+        echo "  $((i+1))) $timestamp - $date_formatted ($size)"
+    done
+
+    echo
+    echo "  0) Cancel"
+    echo
+
+    local choice
+    while true; do
+        read -p "Select backup to restore (0-${#backups[@]}): " choice
+
+        if [ "$choice" = "0" ]; then
+            print_info "Cancelled"
+            echo
+            read -p "Press Enter to continue..."
+            return
+        elif [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le ${#backups[@]} ]; then
+            break
+        else
+            print_error "Invalid selection"
+        fi
+    done
+
+    local backup_file="${backups[$((choice-1))]}"
+    echo
+    print_warning "This will replace the current database with the backup"
+    echo
+
+    if ! ask_yes_no "Are you SURE you want to restore this backup?"; then
+        print_info "Cancelled"
+        echo
+        read -p "Press Enter to continue..."
+        return
+    fi
+
+    if restore_database "$backup_file"; then
+        print_success "Database restored successfully"
+    else
+        print_error "Failed to restore database"
+    fi
+
+    echo
+    read -p "Press Enter to continue..."
+}
+
+# Reset database menu
 reset_database_menu() {
     clear
     print_ascii_header
@@ -1331,6 +1896,17 @@ reset_database_menu() {
     print_warning "This will delete all peer quality tracking data"
     echo
 
+    # Offer to backup first
+    if ask_yes_no "Create a backup before resetting?"; then
+        local backup
+        if backup=$(backup_database); then
+            print_success "Backup created: $backup"
+        else
+            print_warning "Backup failed, but continuing"
+        fi
+    fi
+
+    echo
     if ! ask_yes_no "Are you sure you want to reset the database?"; then
         return
     fi
@@ -1354,7 +1930,56 @@ import_peers_menu() {
     print_info "Import peers from a JSON file"
     echo
 
-    local file_path=$(ask_input "Enter path to JSON file")
+    # Check for exported peer files
+    local export_dir="$BACKUP_DIR/exported_peers"
+    local exports
+    mapfile -t exports < <(find "$export_dir" -name "*.json" -type f -printf '%T@ %p\n' 2>/dev/null | sort -rn | cut -d' ' -f2-)
+
+    if [ ${#exports[@]} -gt 0 ]; then
+        echo "Available export files:"
+        echo
+        for i in "${!exports[@]}"; do
+            local export_file="${exports[$i]}"
+            local filename=$(basename "$export_file")
+            local size=$(ls -lh "$export_file" | awk '{print $5}')
+            echo "  $((i+1))) $filename ($size)"
+        done
+        echo
+        echo "  0) Enter custom path"
+        echo
+
+        local choice
+        while true; do
+            read -p "Select file to import (0-${#exports[@]}, or 'q' to quit): " choice
+
+            if [[ "$choice" == "q" ]] || [[ "$choice" == "Q" ]]; then
+                return
+            elif [[ "$choice" == "0" ]]; then
+                break
+            elif [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le ${#exports[@]} ]; then
+                local file_path="${exports[$((choice-1))]}"
+                break
+            else
+                print_error "Invalid selection"
+            fi
+        done
+    fi
+
+    # Custom path entry
+    if [ -z "$file_path" ] || [ "$choice" == "0" ]; then
+        echo
+        echo "Enter path to JSON file (example: $export_dir/ipv4_peers_*.json)"
+        echo "or press Ctrl+C to cancel"
+        echo
+        read -p "File path: " -r file_path
+
+        if [ -z "$file_path" ]; then
+            print_error "No file specified"
+            echo
+            read -p "Press Enter to continue..."
+            return
+        fi
+    fi
 
     if [ ! -f "$file_path" ]; then
         print_error "File not found: $file_path"
@@ -1462,10 +2087,19 @@ export_peers_menu() {
     echo "  4) IPv4 peers"
     echo "  6) IPv6 peers"
     echo "  B) Both (separate files)"
+    echo "  0) Cancel and return to main menu"
     echo
 
     local selection
     read -p "Enter selection: " -r selection
+
+    # Handle exit
+    if [[ "$selection" == "0" ]] || [[ "$selection" =~ ^[Qq]$ ]]; then
+        print_info "Cancelled"
+        echo
+        read -p "Press Enter to continue..."
+        return
+    fi
 
     local export_dir="$BACKUP_DIR/exported_peers"
     mkdir -p "$export_dir"
@@ -1541,8 +2175,9 @@ restore_config_menu() {
     echo "Available backups in $BACKUP_DIR:"
     echo
 
+    # Get backups sorted by modification time (newest first)
     local backups
-    mapfile -t backups < <(list_backups)
+    mapfile -t backups < <(find "$BACKUP_DIR" -name "cjdroute_backup_*.conf" -type f -printf '%T@ %p\n' 2>/dev/null | sort -rn | cut -d' ' -f2-)
 
     if [ ${#backups[@]} -eq 0 ]; then
         print_warning "No backups found in $BACKUP_DIR"
@@ -1551,7 +2186,7 @@ restore_config_menu() {
         return
     fi
 
-    # Show backups with numbers
+    # Show backups with numbers (newest first)
     for i in "${!backups[@]}"; do
         local backup="${backups[$i]}"
         local timestamp=$(basename "$backup" | sed 's/cjdroute_backup_\(.*\)\.conf/\1/')
@@ -1613,8 +2248,16 @@ restart_service() {
     print_subheader "Restarting cjdns Service"
 
     if [ -z "$CJDNS_SERVICE" ]; then
-        print_warning "Service name not detected"
-        CJDNS_SERVICE=$(ask_input "Enter cjdns service name" "cjdroute")
+        print_error "Service management unavailable"
+        echo
+        echo "Restart function is unavailable because no service was found during initialization."
+        echo "Please restart cjdns manually using one of these methods:"
+        echo "  - sudo systemctl restart cjdns.service"
+        echo "  - sudo systemctl restart cjdroute"
+        echo "  - Or restart using your system's init system"
+        echo
+        read -p "Press Enter to continue..."
+        return 1
     fi
 
     echo "Restarting $CJDNS_SERVICE..."
@@ -1661,8 +2304,8 @@ main() {
         case "$choice" in
             1) peer_adding_wizard ;;
             2) discover_preview ;;
-            3) config_editor_menu ;;
-            4) remove_peers_menu ;;
+            3) guided_config_editor ;;
+            4) interactive_peer_management ;;
             5) view_peer_status ;;
             6) maintenance_menu ;;
             0)

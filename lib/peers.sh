@@ -238,12 +238,14 @@ filter_new_peers() {
 
 # Smart duplicate detection - detects address matches with different credentials
 # Returns: filtered peers JSON + updates JSON (if user approves updates)
+# Parameter 6 (optional): interactive mode (1=interactive/ask user, 0=non-interactive/silent)
 smart_duplicate_check() {
     local new_peers_file="$1"
     local config_file="$2"
     local interface_index="$3"
     local output_new="$4"
     local output_updates="$5"
+    local interactive="${6:-1}"  # Default to interactive mode
 
     # Extract existing peers from config
     local existing_peers=$(mktemp)
@@ -267,24 +269,32 @@ smart_duplicate_check() {
 
             # Compare JSON objects
             if [ "$config_peer" != "$new_peer" ]; then
-                # Fields differ - show comparison
-                print_warning "Duplicate address found with different credentials: $addr"
-                echo
-                echo "Current configuration:"
-                echo "$config_peer" | jq -r 'to_entries[] | "  \(.key): \(.value)"'
-                echo
-                echo "New peer data:"
-                echo "$new_peer" | jq -r 'to_entries[] | "  \(.key): \(.value)"'
-                echo
+                # Fields differ
+                if [ "$interactive" -eq 1 ]; then
+                    # Interactive mode - show comparison and ask
+                    print_warning "Duplicate address found with different credentials: $addr"
+                    echo
+                    echo "Current configuration:"
+                    echo "$config_peer" | jq -r 'to_entries[] | "  \(.key): \(.value)"'
+                    echo
+                    echo "New peer data:"
+                    echo "$new_peer" | jq -r 'to_entries[] | "  \(.key): \(.value)"'
+                    echo
 
-                if ask_yes_no "Update this peer with new credentials?"; then
-                    # Add to updates JSON
+                    if ask_yes_no "Update this peer with new credentials?"; then
+                        # Add to updates JSON
+                        jq -s --arg addr "$addr" --argjson peer "$new_peer" \
+                            '.[0] + {($addr): $peer}' "$output_updates" > "$output_updates.tmp"
+                        mv "$output_updates.tmp" "$output_updates"
+                        print_success "Will update peer: $addr"
+                    else
+                        print_info "Keeping existing configuration for: $addr"
+                    fi
+                else
+                    # Non-interactive mode - silently add to updates (user can decide later)
                     jq -s --arg addr "$addr" --argjson peer "$new_peer" \
                         '.[0] + {($addr): $peer}' "$output_updates" > "$output_updates.tmp"
                     mv "$output_updates.tmp" "$output_updates"
-                    print_success "Will update peer: $addr"
-                else
-                    print_info "Keeping existing configuration for: $addr"
                 fi
             else
                 # Exact duplicate - skip silently
