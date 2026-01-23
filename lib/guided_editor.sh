@@ -55,7 +55,8 @@ add_peer_guided() {
         fi
         printf "│ %-15s %-46s │\n" "Login:" "${login:-<optional>}"
 
-        if [ ${#custom_fields[@]:-0} -gt 0 ]; then
+        set +u  # Temporarily disable for array check
+        if [ ${#custom_fields[@]} -gt 0 ]; then
             echo "├────────────────────────────────────────────────────────────────┤"
             printf "│ %-62s │\n" "OPTIONAL FIELDS:"
             for field_name in "${!custom_fields[@]}"; do
@@ -63,6 +64,7 @@ add_peer_guided() {
                 printf "│ %-15s %-46s │\n" "$field_name:" "${val:0:46}"
             done
         fi
+        set -u  # Re-enable
         echo "└────────────────────────────────────────────────────────────────┘"
         echo
 
@@ -351,7 +353,8 @@ edit_peer_guided() {
         fi
         printf "│ %-15s %-46s │\n" "Login:" "${login:-<not set>}"
 
-        if [ ${#custom_fields[@]:-0} -gt 0 ]; then
+        set +u  # Temporarily disable for array check
+        if [ ${#custom_fields[@]} -gt 0 ]; then
             echo "├────────────────────────────────────────────────────────────────┤"
             printf "│ %-62s │\n" "OPTIONAL FIELDS:"
             for field_name in "${!custom_fields[@]}"; do
@@ -359,6 +362,7 @@ edit_peer_guided() {
                 printf "│ %-15s %-46s │\n" "$field_name:" "${val:0:46}"
             done
         fi
+        set -u  # Re-enable
         echo "└────────────────────────────────────────────────────────────────┘"
         echo
 
@@ -417,11 +421,14 @@ edit_peer_guided() {
                 fi
                 ;;
             "Remove Custom Field")
-                if [ ${#custom_fields[@]:-0} -eq 0 ]; then
+                set +u  # Temporarily disable for array check
+                if [ ${#custom_fields[@]} -eq 0 ]; then
+                    set -u  # Re-enable
                     echo
                     print_warning "No custom fields to remove"
                     sleep 1
                 else
+                    set -u  # Re-enable
                     echo
                     local -a field_list=()
                     for fn in "${!custom_fields[@]}"; do
