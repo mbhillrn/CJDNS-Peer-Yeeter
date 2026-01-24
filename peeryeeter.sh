@@ -384,13 +384,18 @@ peer_adding_wizard() {
 
     # Step 2: Update local address database
     print_subheader "Step 2: Updating Local Address Database"
-    print_info "Fetching latest peers from online sources..."
+    echo
+    print_bold "Fetching latest addresses from online sources..."
+    echo
 
     local result=$(update_master_list)
     local master_ipv4=$(echo "$result" | cut -d'|' -f1)
     local master_ipv6=$(echo "$result" | cut -d'|' -f2)
 
-    print_success "Local Address Database updated: $master_ipv4 IPv4, $master_ipv6 IPv6 peers"
+    echo
+    print_bold "✓ Local Address Database updated"
+    echo -e "  ${YELLOW}$master_ipv4${NC} IPv4 addresses found"
+    echo -e "  ${ORANGE}$master_ipv6${NC} IPv6 addresses found"
     echo
 
     # Step 3: Filter for new peers
@@ -416,19 +421,19 @@ peer_adding_wizard() {
         echo "{}" > "$discovered_ipv6"
     fi
 
-    # Smart duplicate detection
+    # Smart duplicate detection (non-interactive mode - just collect data)
     local new_counts_ipv4="0|0"
     local new_counts_ipv6="0|0"
 
     if [ "$protocol" = "ipv4" ] || [ "$protocol" = "both" ]; then
-        new_counts_ipv4=$(smart_duplicate_check "$discovered_ipv4" "$CJDNS_CONFIG" 0 "$new_ipv4" "$updates_ipv4")
+        new_counts_ipv4=$(smart_duplicate_check "$discovered_ipv4" "$CJDNS_CONFIG" 0 "$new_ipv4" "$updates_ipv4" 0)
     else
         echo "{}" > "$new_ipv4"
         echo "{}" > "$updates_ipv4"
     fi
 
     if [ "$protocol" = "ipv6" ] || [ "$protocol" = "both" ]; then
-        new_counts_ipv6=$(smart_duplicate_check "$discovered_ipv6" "$CJDNS_CONFIG" 1 "$new_ipv6" "$updates_ipv6")
+        new_counts_ipv6=$(smart_duplicate_check "$discovered_ipv6" "$CJDNS_CONFIG" 1 "$new_ipv6" "$updates_ipv6" 0)
     else
         echo "{}" > "$new_ipv6"
         echo "{}" > "$updates_ipv6"
@@ -439,8 +444,14 @@ peer_adding_wizard() {
     local new_ipv6_count=$(echo "$new_counts_ipv6" | cut -d'|' -f1)
     local update_ipv6_count=$(echo "$new_counts_ipv6" | cut -d'|' -f2)
 
-    print_success "New peers: $new_ipv4_count IPv4, $new_ipv6_count IPv6"
-    print_info "Updates: $update_ipv4_count IPv4, $update_ipv6_count IPv6"
+    echo
+    echo "Summary:"
+    echo -e "  ${YELLOW}$new_ipv4_count${NC} new IPv4 peers not in config"
+    echo -e "  ${ORANGE}$new_ipv6_count${NC} new IPv6 peers not in config"
+    if [ "$update_ipv4_count" -gt 0 ] || [ "$update_ipv6_count" -gt 0 ]; then
+        echo -e "  ${CYAN}$update_ipv4_count${NC} IPv4 credential updates available"
+        echo -e "  ${CYAN}$update_ipv6_count${NC} IPv6 credential updates available"
+    fi
     echo
 
     if [ "$new_ipv4_count" -eq 0 ] && [ "$new_ipv6_count" -eq 0 ]; then

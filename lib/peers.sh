@@ -272,23 +272,23 @@ smart_duplicate_check() {
                 # Fields differ
                 if [ "$interactive" -eq 1 ]; then
                     # Interactive mode - show comparison and ask
-                    print_warning "Duplicate address found with different credentials: $addr"
-                    echo
-                    echo "Current configuration:"
-                    echo "$config_peer" | jq -r 'to_entries[] | "  \(.key): \(.value)"'
-                    echo
-                    echo "New peer data:"
-                    echo "$new_peer" | jq -r 'to_entries[] | "  \(.key): \(.value)"'
-                    echo
+                    print_warning "Duplicate address found with different credentials: $addr" >&2
+                    echo >&2
+                    echo "Current configuration:" >&2
+                    echo "$config_peer" | jq -r 'to_entries[] | "  \(.key): \(.value)"' >&2
+                    echo >&2
+                    echo "New peer data:" >&2
+                    echo "$new_peer" | jq -r 'to_entries[] | "  \(.key): \(.value)"' >&2
+                    echo >&2
 
                     if ask_yes_no "Update this peer with new credentials?"; then
                         # Add to updates JSON
                         jq -s --arg addr "$addr" --argjson peer "$new_peer" \
                             '.[0] + {($addr): $peer}' "$output_updates" > "$output_updates.tmp"
                         mv "$output_updates.tmp" "$output_updates"
-                        print_success "Will update peer: $addr"
+                        print_success "Will update peer: $addr" >&2
                     else
-                        print_info "Keeping existing configuration for: $addr"
+                        print_info "Keeping existing configuration for: $addr" >&2
                     fi
                 else
                     # Non-interactive mode - silently add to updates (user can decide later)

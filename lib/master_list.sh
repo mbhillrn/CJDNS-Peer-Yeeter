@@ -64,7 +64,7 @@ update_master_list() {
         local type=$(echo "$source_json" | jq -r '.type')
         local url=$(echo "$source_json" | jq -r '.url')
 
-        print_info "Updating from: $name"
+        print_info "Updating from: $name..." >&2
 
         if [ "$type" = "github" ]; then
             update_from_github "$url" "$name" "$temp_dir" "$updated_ipv4" "$updated_ipv6"
@@ -103,7 +103,7 @@ update_from_github() {
     local repo_dir="$temp_dir/$name"
 
     if ! git clone --depth 1 --quiet "$url" "$repo_dir" 2>/dev/null; then
-        print_warning "Failed to clone $name"
+        print_warning "Failed to clone $name" >&2
         return 1
     fi
 
