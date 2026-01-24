@@ -78,13 +78,45 @@ restore_config() {
 validate_config() {
     local config_file="$1"
 
+    # First check if it's valid JSON
     if ! jq empty "$config_file" 2>/dev/null; then
+        print_error "Config is not valid JSON" >&2
         return 1
     fi
 
-    # Check for required fields
+    # Check for required top-level fields
+    local required_fields=("interfaces" "router" "security")
+    for field in "${required_fields[@]}"; do
+        if ! jq -e ".$field" "$config_file" &>/dev/null; then
+            print_error "Config missing required field: .$field" >&2
+            return 1
+        fi
+    done
+
+    # Check for UDPInterface
     if ! jq -e '.interfaces.UDPInterface' "$config_file" &>/dev/null; then
+        print_error "Config missing .interfaces.UDPInterface" >&2
         return 1
+    fi
+
+    # Check if UDPInterface is an array
+    if ! jq -e '.interfaces.UDPInterface | type == "array"' "$config_file" &>/dev/null; then
+        print_error ".interfaces.UDPInterface must be an array" >&2
+        return 1
+    fi
+
+    # Check for admin section
+    if ! jq -e '.admin.bind' "$config_file" &>/dev/null; then
+        print_error "Config missing .admin.bind" >&2
+        return 1
+    fi
+
+    # Try to validate with cjdroute if available
+    if command -v cjdroute &>/dev/null; then
+        if ! cjdroute --check < "$config_file" &>/dev/null; then
+            print_warning "cjdroute --check failed on config" >&2
+            return 1
+        fi
     fi
 
     return 0
@@ -96,6 +128,12 @@ add_peers_to_config() {
     local peers_json="$2"
     local interface_index="$3"
     local temp_config="$4"
+
+    # Check if the interface exists
+    if ! jq -e --argjson idx "$interface_index" '.interfaces.UDPInterface[$idx]' "$config_file" &>/dev/null; then
+        print_error "Interface $interface_index does not exist in config" >&2
+        return 1
+    fi
 
     # First, ensure the interface has a connectTo field
     # If it doesn't exist, create it as an empty object

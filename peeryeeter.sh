@@ -341,6 +341,10 @@ peer_adding_wizard() {
     print_info "This wizard will guide you through discovering, testing, and adding peers."
     echo
 
+    # Verify config structure
+    local ipv4_interface_exists=$(jq -e '.interfaces.UDPInterface[0]' "$CJDNS_CONFIG" &>/dev/null && echo 1 || echo 0)
+    local ipv6_interface_exists=$(jq -e '.interfaces.UDPInterface[1]' "$CJDNS_CONFIG" &>/dev/null && echo 1 || echo 0)
+
     # Step 1: Ask protocol selection
     print_subheader "Step 1: Protocol Selection"
     echo "What protocol would you like to discover peers for?"
@@ -355,16 +359,30 @@ peer_adding_wizard() {
         read -p "Enter selection (4/6/B/0): " -r protocol < /dev/tty
         case "$protocol" in
             4|[Ii][Pp][Vv]4)
+                if [ "$ipv4_interface_exists" -eq 0 ]; then
+                    print_error "IPv4 interface (UDPInterface[0]) not found in config!"
+                    continue
+                fi
                 protocol="ipv4"
                 print_success "IPv4 only selected"
                 break
                 ;;
             6|[Ii][Pp][Vv]6)
+                if [ "$ipv6_interface_exists" -eq 0 ]; then
+                    print_error "IPv6 interface (UDPInterface[1]) not found in config!"
+                    continue
+                fi
                 protocol="ipv6"
                 print_success "IPv6 only selected"
                 break
                 ;;
             [Bb]|[Bb][Oo][Tt][Hh])
+                if [ "$ipv4_interface_exists" -eq 0 ] || [ "$ipv6_interface_exists" -eq 0 ]; then
+                    print_error "Both interfaces not available in config!"
+                    print_info "IPv4: $([ "$ipv4_interface_exists" -eq 1 ] && echo "Available" || echo "Missing")"
+                    print_info "IPv6: $([ "$ipv6_interface_exists" -eq 1 ] && echo "Available" || echo "Missing")"
+                    continue
+                fi
                 protocol="both"
                 print_success "Both IPv4 and IPv6 selected"
                 break
@@ -449,8 +467,11 @@ peer_adding_wizard() {
     echo -e "  ${YELLOW}$new_ipv4_count${NC} new IPv4 peers not in config"
     echo -e "  ${ORANGE}$new_ipv6_count${NC} new IPv6 peers not in config"
     if [ "$update_ipv4_count" -gt 0 ] || [ "$update_ipv6_count" -gt 0 ]; then
-        echo -e "  ${CYAN}$update_ipv4_count${NC} IPv4 credential updates available"
-        echo -e "  ${CYAN}$update_ipv6_count${NC} IPv6 credential updates available"
+        echo
+        print_info "Peers with updated credentials (not tested yet):"
+        echo -e "  ${CYAN}$update_ipv4_count${NC} IPv4 peers have newer info in database"
+        echo -e "  ${CYAN}$update_ipv6_count${NC} IPv6 peers have newer info in database"
+        echo -e "  ${DIM}(These are peers already in your config with updated contact/location info)${NC}"
     fi
     echo
 
@@ -490,8 +511,9 @@ peer_adding_wizard() {
     local inactive_ipv6_count=$(jq 'length' "$inactive_ipv6")
 
     echo
-    print_success "Active: $active_ipv4_count IPv4, $active_ipv6_count IPv6"
-    print_warning "Inactive: $inactive_ipv4_count IPv4, $inactive_ipv6_count IPv6"
+    echo "Local address database test results:"
+    print_success "  Active: $active_ipv4_count IPv4, $active_ipv6_count IPv6"
+    print_warning "  Inactive: $inactive_ipv4_count IPv4, $inactive_ipv6_count IPv6"
     echo
 
     # Step 5: Selection options
