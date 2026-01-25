@@ -143,7 +143,13 @@ initialize() {
         echo "If your service has a different name or you don't have a systemd service,"
         echo "you can enter it here or leave blank to continue without service management."
         echo
-        CJDNS_SERVICE=$(ask_input "Service name (or press Enter to skip)" "")
+        CJDNS_SERVICE=$(ask_input "Service name (or press Enter to skip)" "" "true")
+
+        # Handle skipped service
+        if [ -z "$CJDNS_SERVICE" ]; then
+            print_info "Skipped - continuing without service management"
+            print_warning "Service restart functions will not be available"
+        fi
 
         # Validate service if provided
         if [ -n "$CJDNS_SERVICE" ]; then
@@ -1681,9 +1687,16 @@ view_peer_status() {
         update_peer_state "$address" "$state"
     done < "$peer_states"
 
-    local total=$(wc -l < "$peer_states")
-    local established=$(grep -c "^ESTABLISHED|" "$peer_states" || echo 0)
-    local unresponsive=$(grep -c "^UNRESPONSIVE|" "$peer_states" || echo 0)
+    local total=$(wc -l < "$peer_states" 2>/dev/null || echo 0)
+    local established=$(grep -c "^ESTABLISHED|" "$peer_states" 2>/dev/null || echo 0)
+    local unresponsive=$(grep -c "^UNRESPONSIVE|" "$peer_states" 2>/dev/null || echo 0)
+    # Ensure numeric values
+    total=${total//[^0-9]/}
+    established=${established//[^0-9]/}
+    unresponsive=${unresponsive//[^0-9]/}
+    [ -z "$total" ] && total=0
+    [ -z "$established" ] && established=0
+    [ -z "$unresponsive" ] && unresponsive=0
     local other=$((total - established - unresponsive))
 
     echo "Total peers: $total"

@@ -106,14 +106,20 @@ ask_selection() {
 }
 
 # Ask for text input
+# Usage: ask_input "prompt" ["default"] ["allow_empty"]
+# If allow_empty is "true", empty input is allowed even without a default
 ask_input() {
     local prompt="$1"
     local default="${2:-}"  # Default to empty string if $2 not provided
+    local allow_empty="${3:-false}"  # Third param to allow empty input
     local response
 
     if [ -n "$default" ]; then
         read -p "$prompt [$default]: " -r response < /dev/tty
         echo "${response:-$default}"
+    elif [ "$allow_empty" = "true" ]; then
+        read -p "$prompt: " -r response < /dev/tty
+        echo "$response"
     else
         while true; do
             read -p "$prompt: " -r response < /dev/tty
