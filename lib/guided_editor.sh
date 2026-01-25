@@ -582,6 +582,238 @@ view_all_peers() {
     read -p "Press Enter to continue..."
 }
 
+# Configure public peering
+configure_public_peering() {
+    clear
+    print_ascii_header
+    print_header "Configure Public Peering"
+    echo
+
+    # Check current state
+    local current_id
+    current_id=$(jq -r '.router.publicPeer.id // ""' "$CJDNS_CONFIG" 2>/dev/null)
+
+    if [ -n "$current_id" ]; then
+        print_success "Public peering is currently ENABLED"
+        echo "  Node ID: $current_id"
+        echo
+        print_info "Use arrow keys to navigate, Enter to select"
+        echo
+
+        local action
+        if action=$(gum choose --height 6 "Change Node Name" "Disable Public Peering" "Cancel" 2>/dev/tty </dev/tty); then
+            :
+        else
+            return
+        fi
+
+        case "$action" in
+            "Change Node Name")
+                echo
+                local new_name
+                new_name=$(gum input --placeholder "Enter new node name (e.g., YourNodeName)" --value "${current_id#PUB_}" --width 60 2>/dev/tty </dev/tty)
+                if [ -z "$new_name" ]; then
+                    print_info "Cancelled"
+                    sleep 1
+                    return
+                fi
+
+                # Create backup
+                echo
+                print_working "Creating automatic backup..."
+                local backup
+                if backup=$(backup_config "$CJDNS_CONFIG"); then
+                    print_success "Backup created: $backup"
+                else
+                    print_warning "Backup failed"
+                    if ! gum confirm "Continue without backup?" 2>/dev/tty </dev/tty; then
+                        return
+                    fi
+                fi
+
+                # Update config
+                local temp_config="$WORK_DIR/config_public_peer.json"
+                if jq --arg id "PUB_$new_name" '.router.publicPeer.id = $id' "$CJDNS_CONFIG" > "$temp_config"; then
+                    if validate_config "$temp_config"; then
+                        cp "$temp_config" "$CJDNS_CONFIG"
+                        echo
+                        print_success "Public peer node name updated to: PUB_$new_name"
+                        prompt_restart_with_journal
+                    else
+                        print_error "Config validation failed - changes not applied"
+                    fi
+                else
+                    print_error "Failed to update config"
+                fi
+                ;;
+            "Disable Public Peering")
+                echo
+                if ! gum confirm "Are you sure you want to disable public peering?" 2>/dev/tty </dev/tty; then
+                    print_info "Cancelled"
+                    sleep 1
+                    return
+                fi
+
+                # Create backup
+                echo
+                print_working "Creating automatic backup..."
+                local backup
+                if backup=$(backup_config "$CJDNS_CONFIG"); then
+                    print_success "Backup created: $backup"
+                else
+                    print_warning "Backup failed"
+                    if ! gum confirm "Continue without backup?" 2>/dev/tty </dev/tty; then
+                        return
+                    fi
+                fi
+
+                # Update config - set publicPeer to empty object
+                local temp_config="$WORK_DIR/config_public_peer.json"
+                if jq '.router.publicPeer = {}' "$CJDNS_CONFIG" > "$temp_config"; then
+                    if validate_config "$temp_config"; then
+                        cp "$temp_config" "$CJDNS_CONFIG"
+                        echo
+                        print_success "Public peering disabled"
+                        prompt_restart_with_journal
+                    else
+                        print_error "Config validation failed - changes not applied"
+                    fi
+                else
+                    print_error "Failed to update config"
+                fi
+                ;;
+            "Cancel"|"")
+                return
+                ;;
+        esac
+    else
+        print_info "Public peering is currently DISABLED"
+        echo
+        echo "Enabling public peering allows other nodes on the network to"
+        echo "automatically discover and connect to your node."
+        echo
+        print_info "Use arrow keys to navigate, Enter to select"
+        echo
+
+        local action
+        if action=$(gum choose --height 6 "Enable Public Peering" "Cancel" 2>/dev/tty </dev/tty); then
+            :
+        else
+            return
+        fi
+
+        case "$action" in
+            "Enable Public Peering")
+                echo
+                print_info "Enter a name for your node (will be prefixed with PUB_)"
+                local node_name
+                node_name=$(gum input --placeholder "Enter node name (e.g., YourNodeName)" --width 60 2>/dev/tty </dev/tty)
+                if [ -z "$node_name" ]; then
+                    print_info "Cancelled"
+                    sleep 1
+                    return
+                fi
+
+                # Confirm
+                echo
+                print_bold "Your public peer ID will be: PUB_$node_name"
+                echo
+                if ! gum confirm "Enable public peering with this name?" 2>/dev/tty </dev/tty; then
+                    print_info "Cancelled"
+                    sleep 1
+                    return
+                fi
+
+                # Create backup
+                echo
+                print_working "Creating automatic backup..."
+                local backup
+                if backup=$(backup_config "$CJDNS_CONFIG"); then
+                    print_success "Backup created: $backup"
+                else
+                    print_warning "Backup failed"
+                    if ! gum confirm "Continue without backup?" 2>/dev/tty </dev/tty; then
+                        return
+                    fi
+                fi
+
+                # Update config
+                local temp_config="$WORK_DIR/config_public_peer.json"
+                if jq --arg id "PUB_$node_name" '.router.publicPeer = {id: $id}' "$CJDNS_CONFIG" > "$temp_config"; then
+                    if validate_config "$temp_config"; then
+                        cp "$temp_config" "$CJDNS_CONFIG"
+                        echo
+                        print_success "Public peering enabled!"
+                        echo "  Node ID: PUB_$node_name"
+                        prompt_restart_with_journal
+                    else
+                        print_error "Config validation failed - changes not applied"
+                    fi
+                else
+                    print_error "Failed to update config"
+                fi
+                ;;
+            "Cancel"|"")
+                return
+                ;;
+        esac
+    fi
+
+    echo
+    read -p "Press Enter to continue..."
+}
+
+# Prompt for restart and show journal output
+prompt_restart_with_journal() {
+    echo
+    if [ -z "$CJDNS_SERVICE" ]; then
+        print_warning "Service management unavailable - restart manually if needed"
+        return
+    fi
+
+    if gum confirm "Restart cjdns service now?" 2>/dev/tty </dev/tty; then
+        print_subheader "Restarting cjdns Service"
+        echo "Restarting $CJDNS_SERVICE..."
+
+        if systemctl restart "$CJDNS_SERVICE"; then
+            print_success "Service restart command sent"
+
+            # Wait for service to start
+            sleep 3
+
+            # Show journal output regardless of status
+            echo
+            print_subheader "Service Journal (last 10 lines)"
+            echo "─────────────────────────────────────────────────────────────────"
+            journalctl -u "$CJDNS_SERVICE" -b --no-pager -n 10 2>/dev/null || echo "Unable to read journal"
+            echo "─────────────────────────────────────────────────────────────────"
+
+            # Check if cjdns is responding
+            echo
+            local attempts=0
+            local max_attempts=3
+            while [ $attempts -lt $max_attempts ]; do
+                sleep 2
+                if test_cjdnstool_connection "$ADMIN_IP" "$ADMIN_PORT" "$ADMIN_PASSWORD" 2>/dev/null; then
+                    print_success "cjdns is running and responding"
+                    return
+                fi
+                attempts=$((attempts + 1))
+            done
+
+            print_warning "Service restarted but not responding yet"
+            print_info "Check the journal output above for any errors"
+        else
+            print_error "Failed to restart service"
+            echo
+            print_subheader "Service Journal (last 10 lines)"
+            echo "─────────────────────────────────────────────────────────────────"
+            journalctl -u "$CJDNS_SERVICE" -b --no-pager -n 10 2>/dev/null || echo "Unable to read journal"
+            echo "─────────────────────────────────────────────────────────────────"
+        fi
+    fi
+}
+
 # Main guided config editor menu
 guided_config_editor() {
     while true; do
@@ -595,6 +827,7 @@ guided_config_editor() {
         echo "1) ➕ Add New Peer"
         echo "2) ✏️  Edit Existing Peer"
         echo "3) 👁️  View All Peers"
+        echo "4) 🌐 Configure Public Peering"
         echo
         echo "0) Back to Main Menu"
         echo
@@ -606,6 +839,7 @@ guided_config_editor() {
             1) add_peer_guided ;;
             2) edit_peer_guided ;;
             3) view_all_peers ;;
+            4) configure_public_peering ;;
             0) return ;;
             *) print_error "Invalid choice"; sleep 1 ;;
         esac

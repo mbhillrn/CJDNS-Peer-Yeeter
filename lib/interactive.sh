@@ -96,10 +96,14 @@ interactive_peer_management() {
     print_info "Press ESC to cancel"
     echo
 
-    local selected
-    # Add explicit options and handle cancellation
-    selected=$(gum choose --no-limit --height 20 "${peer_options[@]}" </dev/tty >/dev/tty 2>&1)
-    local gum_exit=$?
+    local selected=""
+    local gum_exit=0
+    # Handle ESC/cancellation gracefully - gum returns non-zero on ESC which can trigger set -e
+    if selected=$(gum choose --no-limit --height 20 "${peer_options[@]}" </dev/tty >/dev/tty 2>&1); then
+        gum_exit=0
+    else
+        gum_exit=$?
+    fi
 
     if [ $gum_exit -ne 0 ] || [ -z "$selected" ]; then
         print_info "Cancelled or no peers selected"
@@ -260,9 +264,14 @@ interactive_file_deletion() {
     print_info "Press ESC to cancel"
     echo
 
-    local selected
-    selected=$(gum choose --no-limit --height 20 "${file_options[@]}" </dev/tty >/dev/tty 2>&1)
-    local gum_exit=$?
+    local selected=""
+    local gum_exit=0
+    # Handle ESC/cancellation gracefully
+    if selected=$(gum choose --no-limit --height 20 "${file_options[@]}" </dev/tty >/dev/tty 2>&1); then
+        gum_exit=0
+    else
+        gum_exit=$?
+    fi
 
     # Check if user cancelled (ESC key) or no selection
     if [ $gum_exit -ne 0 ] || [ -z "$selected" ]; then
