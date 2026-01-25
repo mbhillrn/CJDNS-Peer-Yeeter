@@ -100,25 +100,49 @@ interactive_peer_management() {
     [ $gum_height -gt 50 ] && gum_height=50
     [ $gum_height -lt 10 ] && gum_height=10
 
-    # Use gum to select peers - loop until user selects something or cancels
+    # Use gum to select peers
     print_success "Found ${#peer_addresses[@]} peers in config (${#unresponsive_indices[@]} unresponsive)"
     echo
 
     local selected=""
     local gum_exit=0
+    local preselect_unresponsive=false
+
+    # If there are unresponsive peers, offer to pre-select them
+    if [ ${#unresponsive_indices[@]} -gt 0 ]; then
+        print_info "Pre-select all ${#unresponsive_indices[@]} unresponsive peers? (you can deselect any to keep)"
+        if gum confirm "Pre-select unresponsive?" </dev/tty 2>/dev/tty; then
+            preselect_unresponsive=true
+        fi
+        echo
+    fi
 
     while true; do
         print_info "Use SPACE to select/deselect peers, then ENTER to confirm"
         print_info "Press ESC to cancel and return to menu"
         echo
 
-        # Show the full peer list FIRST - let user browse and select
-        # Handle ESC/cancellation gracefully - gum returns non-zero on ESC which can trigger set -e
-        # Note: stdin from /dev/tty for interactive input, but stdout must NOT be redirected so we can capture it
-        if selected=$(gum choose --no-limit --height "$gum_height" "${peer_options[@]}" </dev/tty 2>/dev/tty); then
-            gum_exit=0
+        # Build gum command with optional pre-selection
+        if [ "$preselect_unresponsive" = true ]; then
+            # Build comma-separated list of unresponsive peer options for --selected
+            local preselected=""
+            for i in "${unresponsive_indices[@]}"; do
+                [ -n "$preselected" ] && preselected="$preselected,"
+                preselected="$preselected${peer_options[$i]}"
+            done
+            if selected=$(gum choose --no-limit --height "$gum_height" --selected "$preselected" "${peer_options[@]}" </dev/tty 2>/dev/tty); then
+                gum_exit=0
+            else
+                gum_exit=$?
+            fi
+            # Only pre-select on first loop iteration
+            preselect_unresponsive=false
         else
-            gum_exit=$?
+            if selected=$(gum choose --no-limit --height "$gum_height" "${peer_options[@]}" </dev/tty 2>/dev/tty); then
+                gum_exit=0
+            else
+                gum_exit=$?
+            fi
         fi
 
         # ESC pressed - return to menu
@@ -132,23 +156,7 @@ interactive_peer_management() {
         # Check if anything was selected
         if [ -z "$selected" ]; then
             echo
-            # If nothing selected but there are unresponsive peers, offer quick select
-            if [ ${#unresponsive_indices[@]} -gt 0 ]; then
-                print_warning "No peers selected."
-                echo
-                if gum confirm "Quick select: Remove all ${#unresponsive_indices[@]} unresponsive peers?" </dev/tty 2>/dev/tty; then
-                    # Build selection of all unresponsive peers
-                    selected=""
-                    for i in "${unresponsive_indices[@]}"; do
-                        [ -n "$selected" ] && selected="$selected"$'\n'
-                        selected="$selected${peer_options[$i]}"
-                    done
-                    break
-                fi
-            else
-                print_warning "No peers selected!"
-            fi
-            echo
+            print_warning "No peers selected!"
             print_info "Use SPACE to select peers first, then press ENTER"
             echo
             read -p "Press Enter to try again..."
