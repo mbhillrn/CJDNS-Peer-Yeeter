@@ -1,197 +1,193 @@
-# CJDNS Peer Manager
-##PLACEHOLDER-TOBEUPDATED!##
-An interactive, portable tool for managing CJDNS peers. Automatically detects your cjdns installation, discovers new peers from multiple sources, tests connectivity, and safely adds peers to your configuration.
+# CJDNS Peer Yeeter
 
-## Features
+A powerful interactive tool for managing CJDNS peers. Automatically discovers peers from multiple sources, tests connectivity, tracks peer quality over time, and safely manages your cjdns configuration.
 
-- **Auto-Detection**: Automatically finds your cjdns config file and running service
-- **Smart Fallbacks**: If auto-detection fails, provides manual selection options
-- **Multi-Source Discovery**: Fetches peers from GitHub repositories and other sources
-- **Connectivity Testing**: Tests peers before adding them to your config
-- **Safe Config Modification**: Creates backups before making any changes, validates JSON
-- **Field Preservation**: Preserves all peer fields exactly as they appear in sources (no synthetic fields)
-- **Portable**: Uses relative paths - works anywhere you place it
-- **Interactive**: User-friendly menus with y/n validation
+## What It Does
+
+- **Discovers peers** from GitHub repositories and public peer lists
+- **Tests connectivity** before adding peers to your config
+- **Tracks peer quality** with a SQLite database (quality scores, uptime history)
+- **Manages both IPv4 and IPv6** peers with automatic interface detection
+- **Creates automatic backups** before any config changes
+- **Provides an interactive menu** with gum-based UI for easy peer selection
 
 ## Requirements
 
-This tool requires the following to be installed on your system:
+### System Dependencies
 
 ```bash
-sudo apt-get install jq git wget
+sudo apt-get install jq git wget sqlite3
 ```
 
-You also need **cjdnstool** to communicate with your cjdns instance:
+### cjdnstool (Required)
+
+You need cjdnstool to communicate with your cjdns instance:
 - https://github.com/furetosan/cjdnstool
+
+### gum (Interactive UI)
+
+The tool will offer to install gum automatically on first run, or install manually:
+
+```bash
+sudo mkdir -p /etc/apt/keyrings
+curl -fsSL https://repo.charm.sh/apt/gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/charm.gpg
+echo "deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *" | sudo tee /etc/apt/sources.list.d/charm.list
+sudo apt update && sudo apt install gum
+```
+
+## Installation
+
+```bash
+git clone https://github.com/mbhillrn/CJDNS-Peer-Yeeter.git
+cd CJDNS-Peer-Yeeter
+sudo ./peeryeeter.sh
+```
 
 ## Usage
 
-### Running the Tool
+Run with sudo (required for config access and service management):
 
 ```bash
-cd cjdns-tools/project
-sudo ./cjdns-manager.sh
+sudo ./peeryeeter.sh
 ```
 
-**Note**: `sudo` is required because the tool needs to:
-- Read/write cjdns config files (typically in `/etc`)
-- Restart the cjdns service
-- Query cjdns via cjdnstool
-
-### First Run
-
-On first run, the tool will:
-
-1. **Check for required tools** (jq, git, wget, cjdnstool)
-2. **Auto-detect your cjdns installation**:
-   - Scans running systemd services for cjdns
-   - Extracts config file location from service
-   - Falls back to listing `/etc/cjdroute_*.conf` files if needed
-3. **Ask for confirmation** on detected config and service
-4. **Extract admin connection info** from your config
-5. **Test connection** to cjdns to ensure it's working
-
-If auto-detection fails or finds multiple configs, you'll be asked to select or manually specify the correct one.
-
-### Main Menu Options
+### Main Menu
 
 ```
-1) View current peer status
-   - Shows ESTABLISHED vs UNRESPONSIVE peers
-   - Connects to cjdns via admin interface
+1) Peer Adding Wizard (Recommended)
+   Complete guided workflow: select protocols, discover peers,
+   test connectivity, preview changes, and apply.
 
-2) Discover new peers from online sources
-   - Fetches from GitHub: hyperboria/peers, yangm97/peers, cwinfo/hyperboria-peers
-   - Tries kaotisk-hund/python-cjdns-peering-tools
-   - Filters out peers already in your config
-   - Shows samples of discovered peers
+2) Discover & Preview Peers
+   Fetch peers from all sources and see what's available.
 
-3) Test peer connectivity
-   - Pings discovered peers to check if they're online
-   - Separates active vs unreachable peers
-   - Required before adding peers
+3) Edit Config File
+   Interactive JSON editor with validation.
 
-4) Add new peers to config
-   - Adds tested active peers to your config
-   - Creates backup before modification
-   - Validates JSON before writing
-   - Preserves all fields exactly as they appear in sources
-   - Offers to restart cjdns service
+4) View Status & Remove Peers
+   See all peers with quality scores, select and remove bad ones.
 
-5) Remove unresponsive peers
-   - Lists peers with UNRESPONSIVE state
-   - Removes them from config (IPv4 only by default)
-   - Creates backup before modification
+5) View Peer Status
+   Real-time peer statistics from cjdns.
 
-6) Restart cjdns service
-   - Restarts your detected cjdns service
-   - Verifies it's responding after restart
-
-0) Exit
+6) Maintenance & Settings
+   Config normalization, backup management, database tools,
+   restart cjdns service.
 ```
 
-## Workflow
+### Recommended Workflow
 
-Typical workflow for adding new peers:
+**Adding new peers:**
+1. Run `sudo ./peeryeeter.sh`
+2. Select **Peer Adding Wizard** (option 1)
+3. Choose IPv4, IPv6, or both
+4. Let it discover and test peers
+5. Review and apply changes
 
-1. Run the tool: `sudo ./cjdns-manager.sh`
-2. Select **option 2** to discover peers
-3. Select **option 3** to test connectivity
-4. Select **option 4** to add active peers
-5. Choose whether to restart cjdns service
+**Cleaning up bad peers:**
+1. Run `sudo ./peeryeeter.sh`
+2. Select **View Status & Remove Peers** (option 4)
+3. Use the interactive selector to pick unresponsive peers
+4. Confirm removal
 
-## Portability
+## How It Works
 
-This tool is designed to be portable. All paths are relative to the script directory.
+### Auto-Detection
 
-To move the tool from `cjdns-tools/project/` to `cjdns-tools/`:
+On startup, the tool automatically:
+1. Scans systemd services for cjdns
+2. Finds your config file location
+3. Extracts admin connection info
+4. Tests connection to cjdns
+5. Locates your cjdroute binary
 
-```bash
-cd cjdns-tools
-mv project/* .
-rmdir project
+No manual configuration needed.
+
+### Peer Sources
+
+Discovers peers from:
+- `hyperboria/peers` (GitHub)
+- `yangm97/peers` (GitHub)
+- `cwinfo/hyperboria-peers` (GitHub)
+- `kaotisk-hund` JSON peer list
+
+### Peer Quality Tracking
+
+The SQLite database tracks:
+- Connection state (ESTABLISHED/UNRESPONSIVE)
+- First and last seen timestamps
+- Quality score (0-100% based on uptime)
+- Total check count
+
+### Safe Config Handling
+
+- Creates timestamped backups before every change
+- Validates JSON syntax
+- Validates with cjdroute --check
+- Only writes required fields (password, publicKey)
+- Strips unnecessary metadata from peer entries
+
+## File Locations
+
+```
+/etc/cjdns_backups/
+├── master_peer_list.json      # Cached discovered peers
+├── peer_sources.json          # Configurable peer sources
+├── peer_tracking.db           # SQLite quality database
+├── cjdroute_backup_*.conf     # Config backups
+└── database_backups/          # Database backups
 ```
 
-Everything will continue to work as long as the directory structure is preserved:
+## Project Structure
 
 ```
-cjdns-tools/
-├── cjdns-manager.sh
+CJDNS-Peer-Yeeter/
+├── peeryeeter.sh          # Main script
 ├── lib/
-│   ├── detect.sh
-│   ├── ui.sh
-│   ├── peers.sh
-│   └── config.sh
-└── README.md
+│   ├── ui.sh              # Colors, prompts, formatting
+│   ├── detect.sh          # Auto-detection logic
+│   ├── peers.sh           # Peer discovery and testing
+│   ├── config.sh          # Config file management
+│   ├── database.sh        # SQLite peer tracking
+│   ├── master_list.sh     # Peer cache management
+│   ├── interactive.sh     # Gum-based menus
+│   ├── editor.sh          # JSON editor
+│   ├── guided_editor.sh   # Smart guided editor
+│   └── prerequisites.sh   # Dependency installation
+├── README.md
+└── LICENSE
 ```
-
-## How Detection Works
-
-### Config File Detection
-
-1. **Smart Detection**: Scans systemd services for `cjd*` pattern
-2. **Service Analysis**: Reads service files and status to find config path
-3. **Pattern Matching**: Looks for `/etc/cjdroute_NNNN.conf` pattern
-4. **Fallback**: Lists all matching files in `/etc` if needed
-5. **Manual Override**: Allows you to specify custom path if all else fails
-
-### Admin Connection
-
-Extracts from your config:
-```json
-"admin": {
-  "bind": "127.0.0.1:11234",
-  "password": "NONE"
-}
-```
-
-Uses this info for all cjdnstool communication.
-
-## Safety Features
-
-- **Always creates backups** before modifying config
-- **Validates JSON** after every modification
-- **Asks for confirmation** before making changes
-- **Preserves exact field structure** from peer sources
-- **Never overwrites** without validation
-- **Graceful error messages** explaining what went wrong
-
-## Testing
-
-The tool has been tested with:
-- cjdnstool (modern Rust-based version)
-- Multiple cjdns config formats (IPv4, IPv6, dual-stack)
-- Various systemd service naming schemes
 
 ## Troubleshooting
 
 ### "cjdnstool not found"
 
-Install cjdnstool from: https://github.com/furetosan/cjdnstool
+Install from: https://github.com/furetosan/cjdnstool
 
 ### "Cannot connect to cjdns admin interface"
 
-Make sure cjdns is running:
+Check if cjdns is running:
 ```bash
 sudo systemctl status cjdroute
-# or
-sudo systemctl status cjdroute-NNNN
 ```
 
 ### "Config validation failed"
 
-The tool detected invalid JSON. Your original config is safe (not modified).
-Check the backup file location shown in the error message.
+Your original config is safe (backup was created). Check the error message for details.
 
 ### "Failed to clone repository"
 
-Check your internet connection. Some sources may be temporarily down.
-The tool will continue with sources that work.
+Some peer sources may be temporarily unavailable. The tool continues with working sources.
 
 ## License
 
-This tool is provided as-is for managing CJDNS peer connections.
+MIT License - see [LICENSE](LICENSE)
 
-## Contributing
+---
 
-This tool is part of the CJDNS-Bitcoin-Node-Address-Harvester project.
+## Donations
+
+If this tool saved you time, consider donating:
+
+**Bitcoin:** `YOUR_BTC_ADDRESS_HERE`
+
