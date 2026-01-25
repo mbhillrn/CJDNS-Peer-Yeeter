@@ -468,10 +468,14 @@ peer_adding_wizard() {
     echo -e "  ${ORANGE}$new_ipv6_count${NC} new IPv6 peers not in config"
     if [ "$update_ipv4_count" -gt 0 ] || [ "$update_ipv6_count" -gt 0 ]; then
         echo
-        print_info "Peers with updated credentials (not tested yet):"
+        print_info "Peers with updated credentials detected:"
         echo -e "  ${CYAN}$update_ipv4_count${NC} IPv4 peers have newer info in database"
         echo -e "  ${CYAN}$update_ipv6_count${NC} IPv6 peers have newer info in database"
-        echo -e "  ${DIM}(These are peers already in your config with updated contact/location info)${NC}"
+        echo -e "  ${DIM}(These are peers ALREADY in your config with updated contact/location info)${NC}"
+        echo
+        if ask_yes_no "Preview credential updates before continuing?"; then
+            wizard_preview_updates "$updates_ipv4" "$updates_ipv6" "$CJDNS_CONFIG"
+        fi
     fi
     echo
 
@@ -766,28 +770,42 @@ wizard_add_peers() {
         fi
     fi
 
-    # Apply updates
-    if [ "$update_ipv4_count" -gt 0 ]; then
-        echo -n "Applying IPv4 credential updates... "
-        if apply_peer_updates "$temp_config" "$updates_ipv4" 0 "$temp_config.new"; then
-            mv "$temp_config.new" "$temp_config"
-            echo -e "${GREEN}✓${NC}"
-            print_success "Updated $update_ipv4_count IPv4 peer credentials"
-        else
-            echo -e "${RED}✗${NC}"
-            print_warning "Failed to apply some IPv4 updates (continuing anyway)"
-        fi
-    fi
+    # Ask about credential updates
+    echo
+    if [ "$update_ipv4_count" -gt 0 ] || [ "$update_ipv6_count" -gt 0 ]; then
+        print_subheader "Credential Updates"
+        print_info "You have $update_ipv4_count IPv4 and $update_ipv6_count IPv6 credential updates available"
+        print_info "These are for peers ALREADY in your config with newer metadata"
+        echo
+        if ask_yes_no "Also apply credential updates while adding new peers?"; then
+            if [ "$update_ipv4_count" -gt 0 ]; then
+                echo -n "Applying IPv4 credential updates... "
+                if apply_peer_updates "$temp_config" "$updates_ipv4" 0 "$temp_config.new"; then
+                    mv "$temp_config.new" "$temp_config"
+                    echo -e "${GREEN}✓${NC}"
+                    print_success "Updated $update_ipv4_count IPv4 peer credentials"
+                else
+                    echo -e "${RED}✗${NC}"
+                    print_warning "Failed to apply some IPv4 updates (continuing anyway)"
+                fi
+            fi
 
-    if [ "$update_ipv6_count" -gt 0 ]; then
-        echo -n "Applying IPv6 credential updates... "
-        if apply_peer_updates "$temp_config" "$updates_ipv6" 1 "$temp_config.new"; then
-            mv "$temp_config.new" "$temp_config"
-            echo -e "${GREEN}✓${NC}"
-            print_success "Updated $update_ipv6_count IPv6 peer credentials"
+            if [ "$update_ipv6_count" -gt 0 ]; then
+                echo -n "Applying IPv6 credential updates... "
+                if apply_peer_updates "$temp_config" "$updates_ipv6" 1 "$temp_config.new"; then
+                    mv "$temp_config.new" "$temp_config"
+                    echo -e "${GREEN}✓${NC}"
+                    print_success "Updated $update_ipv6_count IPv6 peer credentials"
+                else
+                    echo -e "${RED}✗${NC}"
+                    print_warning "Failed to apply some IPv6 updates (continuing anyway)"
+                fi
+            fi
         else
-            echo -e "${RED}✗${NC}"
-            print_warning "Failed to apply some IPv6 updates (continuing anyway)"
+            print_info "Skipping credential updates (only adding new peers)"
+            # Zero out the counts so the summary is accurate
+            update_ipv4_count=0
+            update_ipv6_count=0
         fi
     fi
 
@@ -828,6 +846,69 @@ wizard_add_peers() {
         echo "  • Invalid JSON was generated (please report this as a bug)"
         echo "  • Your config file has structural issues"
     fi
+}
+
+# Wizard helper: preview credential updates
+wizard_preview_updates() {
+    local updates_ipv4="$1"
+    local updates_ipv6="$2"
+    local config_file="$3"
+
+    print_subheader "Credential Update Preview"
+    echo
+    print_info "Showing differences between current config and updated database info:"
+    echo
+
+    # Show IPv4 updates
+    local ipv4_addrs=$(jq -r 'keys[]' "$updates_ipv4" 2>/dev/null)
+    if [ -n "$ipv4_addrs" ]; then
+        echo -e "${YELLOW}IPv4 Updates:${NC}"
+        echo
+        while IFS= read -r addr; do
+            [ -z "$addr" ] && continue
+
+            echo -e "${BOLD}Address: $addr${NC}"
+
+            local current=$(jq --arg addr "$addr" '.interfaces.UDPInterface[0].connectTo[$addr]' "$config_file")
+            local new=$(jq --arg addr "$addr" '.[$addr]' "$updates_ipv4")
+
+            echo "Current config:"
+            echo "$current" | jq -r 'to_entries[] | "  \(.key): \(.value)"'
+            echo
+            echo "New database info:"
+            echo "$new" | jq -r 'to_entries[] | "  \(.key): \(.value)"'
+            echo
+            echo "---"
+            echo
+        done <<< "$ipv4_addrs"
+    fi
+
+    # Show IPv6 updates
+    local ipv6_addrs=$(jq -r 'keys[]' "$updates_ipv6" 2>/dev/null)
+    if [ -n "$ipv6_addrs" ]; then
+        echo -e "${ORANGE}IPv6 Updates:${NC}"
+        echo
+        while IFS= read -r addr; do
+            [ -z "$addr" ] && continue
+
+            echo -e "${BOLD}Address: $addr${NC}"
+
+            local current=$(jq --arg addr "$addr" '.interfaces.UDPInterface[1].connectTo[$addr]' "$config_file")
+            local new=$(jq --arg addr "$addr" '.[$addr]' "$updates_ipv6")
+
+            echo "Current config:"
+            echo "$current" | jq -r 'to_entries[] | "  \(.key): \(.value)"'
+            echo
+            echo "New database info:"
+            echo "$new" | jq -r 'to_entries[] | "  \(.key): \(.value)"'
+            echo
+            echo "---"
+            echo
+        done <<< "$ipv6_addrs"
+    fi
+
+    echo
+    read -p "Press Enter to continue..."
 }
 
 # Wizard helper: apply credential updates

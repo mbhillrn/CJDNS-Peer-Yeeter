@@ -111,12 +111,34 @@ validate_config() {
         return 1
     fi
 
-    # Try to validate with cjdroute if available
-    if command -v cjdroute &>/dev/null; then
-        if ! cjdroute --check < "$config_file" &>/dev/null; then
-            print_warning "cjdroute --check failed on config" >&2
+    # Try to validate with cjdroute if available (check common locations)
+    local cjdroute_bin=""
+    for path in /usr/local/bin/cjdroute /usr/bin/cjdroute /opt/cjdns/cjdroute; do
+        if [ -x "$path" ]; then
+            cjdroute_bin="$path"
+            break
+        fi
+    done
+
+    if [ -n "$cjdroute_bin" ]; then
+        echo -n "  Running cjdroute --check validation... " >&2
+        local check_output=$("$cjdroute_bin" --check < "$config_file" 2>&1)
+        local check_result=$?
+
+        if [ $check_result -ne 0 ]; then
+            echo -e "${RED}✗${NC}" >&2
+            print_error "cjdroute --check FAILED - config will NOT work!" >&2
+            echo >&2
+            echo "Error output:" >&2
+            echo "$check_output" | head -20 >&2
+            echo >&2
+            print_error "Your original config is safe and unchanged" >&2
             return 1
         fi
+        echo -e "${GREEN}✓${NC}" >&2
+    else
+        print_warning "cjdroute binary not found in common locations" >&2
+        print_warning "Skipping native validation - config may fail at runtime!" >&2
     fi
 
     return 0
