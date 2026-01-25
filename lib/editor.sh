@@ -76,7 +76,12 @@ edit_authorized_passwords() {
         return 1
     fi
 
-    jq --slurpfile authpw "$temp_section" '.authorizedPasswords = $authpw[0]' "$config" > "$temp_config"
+    # Normalize authorizedPasswords to ONLY {password, user} format
+    # If entry has "login" but no "user", use login value as user (backwards compat)
+    # Entries without password or user/login are invalid and will be skipped
+    local normalized=$(jq '[.[] | select(.password != null and (.user != null or .login != null)) | {password: .password, user: (.user // .login)}]' "$temp_section")
+
+    jq --argjson authpw "$normalized" '.authorizedPasswords = $authpw' "$config" > "$temp_config"
 
     if validate_config "$temp_config"; then
         print_success "Authorized passwords updated"
@@ -110,12 +115,15 @@ edit_ipv4_peers() {
         return 1
     fi
 
+    # Normalize peers to only password and publicKey (strip metadata)
+    local normalized=$(jq 'to_entries | map({key: .key, value: {password: .value.password, publicKey: .value.publicKey}}) | from_entries' "$temp_section")
+
     # Merge back
-    jq --slurpfile peers "$temp_section" '
+    jq --argjson peers "$normalized" '
         if .interfaces.UDPInterface[0] then
-            .interfaces.UDPInterface[0].connectTo = $peers[0]
+            .interfaces.UDPInterface[0].connectTo = $peers
         else
-            .interfaces.UDPInterface[0] = {"connectTo": $peers[0]}
+            .interfaces.UDPInterface[0] = {"connectTo": $peers}
         end
     ' "$config" > "$temp_config"
 
@@ -161,21 +169,24 @@ edit_ipv6_peers() {
         return 1
     fi
 
+    # Normalize peers to only password and publicKey (strip metadata)
+    local normalized=$(jq 'to_entries | map({key: .key, value: {password: .value.password, publicKey: .value.publicKey}}) | from_entries' "$temp_section")
+
     # Merge back
     if [ "$has_ipv6" = "null" ]; then
         # Create new IPv6 interface with IPv6 bind address prompt
         print_info "Creating new IPv6 interface"
         local ipv6_bind=$(ask_input "Enter IPv6 bind address (e.g., [::]:PORT or [2001:db8::1]:PORT)")
 
-        jq --slurpfile peers "$temp_section" --arg bind "$ipv6_bind" '
+        jq --argjson peers "$normalized" --arg bind "$ipv6_bind" '
             .interfaces.UDPInterface[1] = {
                 "bind": $bind,
-                "connectTo": $peers[0]
+                "connectTo": $peers
             }
         ' "$config" > "$temp_config"
     else
-        jq --slurpfile peers "$temp_section" '
-            .interfaces.UDPInterface[1].connectTo = $peers[0]
+        jq --argjson peers "$normalized" '
+            .interfaces.UDPInterface[1].connectTo = $peers
         ' "$config" > "$temp_config"
     fi
 
@@ -333,11 +344,13 @@ config_editor_menu() {
             echo "9) Interactive JSON Editor (fx) - RECOMMENDED"
         fi
 
+        echo
+        echo "C) Cleanup/Normalize Config (remove extra metadata)"
         echo "0) Back to Main Menu"
         echo
 
         local choice
-        read -p "Enter choice: " choice
+        read -p "Enter choice: " choice < /dev/tty
 
         case "$choice" in
             1|2|3|4|5|6|7)
@@ -484,6 +497,48 @@ config_editor_menu() {
                         cp "$backup" "$CJDNS_CONFIG"
                         print_success "Config restored from backup"
                     fi
+                fi
+
+                echo
+                read -p "Press Enter to continue..."
+                ;;
+            [Cc])
+                clear
+                print_ascii_header
+                print_header "Cleanup/Normalize Config"
+                echo
+
+                print_info "This will normalize your config to minimal required fields:"
+                echo "  • connectTo entries: Only password and publicKey"
+                echo "  • authorizedPasswords: Only password and user"
+                echo
+                print_info "Benefits:"
+                echo "  • Smaller config file"
+                echo "  • More reliable validation"
+                echo "  • Prevents false 'credential update' detections"
+                echo "  • Matches actual cjdns requirements"
+                echo
+                print_warning "Fields that will be removed: peerName, contact, location, login, gpg"
+                print_info "These fields don't affect connectivity - only metadata"
+                echo
+
+                if ! ask_yes_no "Normalize config now?"; then
+                    print_info "Cancelled"
+                    echo
+                    read -p "Press Enter to continue..."
+                    continue
+                fi
+
+                echo
+
+                # Call the normalize_config function from peeryeeter.sh
+                if normalize_config "$CJDNS_CONFIG"; then
+                    echo
+                    if ask_yes_no "Restart cjdns service now to ensure changes work?"; then
+                        restart_service
+                    fi
+                else
+                    print_error "Normalization failed - see errors above"
                 fi
 
                 echo

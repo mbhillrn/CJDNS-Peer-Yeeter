@@ -78,24 +78,92 @@ restore_config() {
 validate_config() {
     local config_file="$1"
 
+    # First check if it's valid JSON
     if ! jq empty "$config_file" 2>/dev/null; then
+        print_error "Config is not valid JSON" >&2
         return 1
     fi
 
-    # Check for required fields
+    # Check for required top-level fields
+    local required_fields=("interfaces" "router" "security")
+    for field in "${required_fields[@]}"; do
+        if ! jq -e ".$field" "$config_file" &>/dev/null; then
+            print_error "Config missing required field: .$field" >&2
+            return 1
+        fi
+    done
+
+    # Check for UDPInterface
     if ! jq -e '.interfaces.UDPInterface' "$config_file" &>/dev/null; then
+        print_error "Config missing .interfaces.UDPInterface" >&2
         return 1
+    fi
+
+    # Check if UDPInterface is an array
+    if ! jq -e '.interfaces.UDPInterface | type == "array"' "$config_file" &>/dev/null; then
+        print_error ".interfaces.UDPInterface must be an array" >&2
+        return 1
+    fi
+
+    # Check for admin section
+    if ! jq -e '.admin.bind' "$config_file" &>/dev/null; then
+        print_error "Config missing .admin.bind" >&2
+        return 1
+    fi
+
+    # Validate with cjdroute if available (using auto-detected binary)
+    if [ -n "${CJDROUTE_BIN:-}" ] && [ -x "$CJDROUTE_BIN" ]; then
+        echo -n "  Running cjdroute --check validation... " >&2
+
+        # Run validation and capture both stdout and stderr
+        local check_output
+        local check_result
+        check_output=$("$CJDROUTE_BIN" --check < "$config_file" 2>&1)
+        check_result=$?
+
+        if [ $check_result -ne 0 ]; then
+            echo -e "${RED}✗${NC}" >&2
+            echo >&2
+            print_error "═══════════════════════════════════════════════════════════════" >&2
+            print_error "  CRITICAL: cjdroute --check FAILED - config will NOT work!" >&2
+            print_error "═══════════════════════════════════════════════════════════════" >&2
+            echo >&2
+            print_info "Validation command: $CJDROUTE_BIN --check" >&2
+            print_info "Exit code: $check_result" >&2
+            echo >&2
+            print_error "Error output from cjdroute:" >&2
+            echo "───────────────────────────────────────────────────────────────" >&2
+            echo "$check_output" | head -30 >&2
+            echo "───────────────────────────────────────────────────────────────" >&2
+            echo >&2
+            print_info "Your original config is safe and unchanged" >&2
+            print_info "The changes were NOT applied to prevent breaking your cjdns installation" >&2
+            return 1
+        else
+            echo -e "${GREEN}✓${NC}" >&2
+            print_info "  Config validated successfully with cjdroute" >&2
+        fi
+    else
+        print_warning "cjdroute binary not available - skipping native validation" >&2
+        print_warning "Config structure checks passed, but may fail at runtime!" >&2
+        print_info "To enable full validation, ensure cjdroute is in PATH or service file" >&2
     fi
 
     return 0
 }
 
-# Add peers to config file (preserves all fields exactly as they appear)
+# Add peers to config file (writes ONLY required fields: password and publicKey)
 add_peers_to_config() {
     local config_file="$1"
     local peers_json="$2"
     local interface_index="$3"
     local temp_config="$4"
+
+    # Check if the interface exists
+    if ! jq -e --argjson idx "$interface_index" '.interfaces.UDPInterface[$idx]' "$config_file" &>/dev/null; then
+        print_error "Interface $interface_index does not exist in config" >&2
+        return 1
+    fi
 
     # First, ensure the interface has a connectTo field
     # If it doesn't exist, create it as an empty object
@@ -107,11 +175,22 @@ add_peers_to_config() {
         end
     ' "$config_file" > "$temp_config.tmp"
 
-    # Now merge peers into the interface
-    # This preserves ALL fields from the peers_json without modification
-    jq --slurpfile new_peers "$peers_json" --argjson idx "$interface_index" \
-        '.interfaces.UDPInterface[$idx].connectTo += $new_peers[0]' \
-        "$temp_config.tmp" > "$temp_config"
+    # Strip peers to only password and publicKey, then merge into the interface
+    # CJDNS only requires these two fields - extra metadata is unnecessary and can cause issues
+    jq --slurpfile new_peers "$peers_json" --argjson idx "$interface_index" '
+        .interfaces.UDPInterface[$idx].connectTo += (
+            $new_peers[0] |
+            to_entries |
+            map({
+                key: .key,
+                value: {
+                    password: .value.password,
+                    publicKey: .value.publicKey
+                }
+            }) |
+            from_entries
+        )
+    ' "$temp_config.tmp" > "$temp_config"
 
     rm -f "$temp_config.tmp"
 

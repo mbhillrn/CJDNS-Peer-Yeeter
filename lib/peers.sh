@@ -263,32 +263,41 @@ smart_duplicate_check() {
         local exists=$(jq -e --arg addr "$addr" 'has($addr)' "$existing_peers" 2>/dev/null)
 
         if [ "$exists" = "true" ]; then
-            # Address exists - compare fields
+            # Address exists - compare ONLY password and publicKey (required fields)
+            # Metadata changes (contact, peerName, etc.) don't matter since we don't write them to config
             local config_peer=$(jq --arg addr "$addr" '.[$addr]' "$existing_peers")
             local new_peer=$(jq --arg addr "$addr" '.[$addr]' "$new_peers_file")
 
-            # Compare JSON objects
-            if [ "$config_peer" != "$new_peer" ]; then
-                # Fields differ
+            # Extract only password and publicKey for comparison
+            local config_password=$(echo "$config_peer" | jq -r '.password // ""')
+            local config_publicKey=$(echo "$config_peer" | jq -r '.publicKey // ""')
+            local new_password=$(echo "$new_peer" | jq -r '.password // ""')
+            local new_publicKey=$(echo "$new_peer" | jq -r '.publicKey // ""')
+
+            # Only consider it a credential update if password OR publicKey changed
+            if [ "$config_password" != "$new_password" ] || [ "$config_publicKey" != "$new_publicKey" ]; then
+                # Actual credentials differ (not just metadata)
                 if [ "$interactive" -eq 1 ]; then
                     # Interactive mode - show comparison and ask
-                    print_warning "Duplicate address found with different credentials: $addr"
-                    echo
-                    echo "Current configuration:"
-                    echo "$config_peer" | jq -r 'to_entries[] | "  \(.key): \(.value)"'
-                    echo
-                    echo "New peer data:"
-                    echo "$new_peer" | jq -r 'to_entries[] | "  \(.key): \(.value)"'
-                    echo
+                    print_warning "Duplicate address found with different credentials: $addr" >&2
+                    echo >&2
+                    echo "Current configuration:" >&2
+                    echo "  password: $config_password" >&2
+                    echo "  publicKey: $config_publicKey" >&2
+                    echo >&2
+                    echo "New peer data:" >&2
+                    echo "  password: $new_password" >&2
+                    echo "  publicKey: $new_publicKey" >&2
+                    echo >&2
 
                     if ask_yes_no "Update this peer with new credentials?"; then
                         # Add to updates JSON
                         jq -s --arg addr "$addr" --argjson peer "$new_peer" \
                             '.[0] + {($addr): $peer}' "$output_updates" > "$output_updates.tmp"
                         mv "$output_updates.tmp" "$output_updates"
-                        print_success "Will update peer: $addr"
+                        print_success "Will update peer: $addr" >&2
                     else
-                        print_info "Keeping existing configuration for: $addr"
+                        print_info "Keeping existing configuration for: $addr" >&2
                     fi
                 else
                     # Non-interactive mode - silently add to updates (user can decide later)
@@ -297,7 +306,8 @@ smart_duplicate_check() {
                     mv "$output_updates.tmp" "$output_updates"
                 fi
             else
-                # Exact duplicate - skip silently
+                # Same credentials (password + publicKey match)
+                # Ignore metadata differences - they don't matter for config
                 :
             fi
         else
@@ -318,7 +328,7 @@ smart_duplicate_check() {
     echo "$new_count|$update_count"
 }
 
-# Apply peer updates to config (for smart duplicate updates)
+# Apply peer updates to config (writes ONLY required fields: password and publicKey)
 apply_peer_updates() {
     local config_file="$1"
     local updates_json="$2"
@@ -334,9 +344,13 @@ apply_peer_updates() {
 
         local peer_data=$(jq --arg addr "$addr" '.[$addr]' "$updates_json")
 
-        # Update the peer in config
+        # Update the peer in config - ONLY password and publicKey (required fields)
+        # Strip metadata to keep config minimal and avoid validation issues
         jq --arg addr "$addr" --argjson peer "$peer_data" --argjson idx "$interface_index" \
-            '.interfaces.UDPInterface[$idx].connectTo[$addr] = $peer' \
+            '.interfaces.UDPInterface[$idx].connectTo[$addr] = {
+                password: $peer.password,
+                publicKey: $peer.publicKey
+            }' \
             "$temp_config" > "$temp_config.tmp"
         mv "$temp_config.tmp" "$temp_config"
 

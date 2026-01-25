@@ -33,6 +33,7 @@ source "$SCRIPT_DIR/lib/guided_editor.sh"
 # Global variables (will be set during initialization)
 CJDNS_CONFIG=""
 CJDNS_SERVICE=""
+CJDROUTE_BIN=""
 ADMIN_IP=""
 ADMIN_PORT=""
 ADMIN_PASSWORD=""
@@ -218,6 +219,26 @@ initialize() {
         print_warning "Service management disabled - you'll need to restart cjdns manually after config changes"
     fi
 
+    # Detect cjdroute binary
+    print_subheader "Detecting cjdroute Binary"
+
+    if CJDROUTE_BIN=$(detect_cjdroute_binary "$CJDNS_SERVICE"); then
+        print_success "Found cjdroute: $CJDROUTE_BIN"
+    else
+        print_warning "cjdroute binary not found - config validation will be limited"
+        print_info "The program will still work, but cannot validate configs before applying them"
+        echo
+        if ask_yes_no "Continue without cjdroute validation?"; then
+            print_info "Continuing with limited validation (JSON structure only)"
+        else
+            print_error "Cannot proceed without cjdroute binary"
+            echo
+            echo "Please ensure cjdroute is installed and in your PATH, or install it from:"
+            echo "  https://github.com/cjdelisle/cjdns"
+            exit 1
+        fi
+    fi
+
     # Validate config file
     print_subheader "Validating Configuration"
 
@@ -332,6 +353,90 @@ show_menu() {
     echo
 }
 
+# Check if config is normalized (only password+publicKey in connectTo)
+check_config_normalized() {
+    local config_file="$1"
+
+    # Check if any connectTo entry has fields beyond password and publicKey
+    local has_extra_fields=$(jq '
+        [.interfaces.UDPInterface[].connectTo // {} |
+         to_entries[] |
+         .value |
+         keys |
+         map(select(. != "password" and . != "publicKey"))] |
+        add |
+        length // 0
+    ' "$config_file")
+
+    if [ "$has_extra_fields" -gt 0 ]; then
+        return 1  # Not normalized
+    fi
+
+    return 0  # Normalized
+}
+
+# Normalize config to minimal format
+normalize_config() {
+    local config_file="$1"
+
+    print_info "Normalizing config..."
+    echo
+
+    # Backup first
+    local backup
+    if backup=$(backup_config "$config_file"); then
+        print_success "Backup created: $backup"
+    else
+        print_error "Failed to create backup - aborting normalization"
+        return 1
+    fi
+
+    local temp_config="$WORK_DIR/normalized_config.json"
+
+    # Normalize connectTo entries and authorizedPasswords
+    jq '
+        # Normalize UDPInterface connectTo entries
+        .interfaces.UDPInterface = [
+            .interfaces.UDPInterface[] |
+            if .connectTo then
+                .connectTo = (.connectTo | to_entries | map({
+                    key: .key,
+                    value: {
+                        password: .value.password,
+                        publicKey: .value.publicKey
+                    }
+                }) | from_entries)
+            else . end
+        ] |
+        # Normalize authorizedPasswords
+        if .authorizedPasswords then
+            .authorizedPasswords = [
+                .authorizedPasswords[] |
+                select(.password != null and (.user != null or .login != null)) |
+                {
+                    password: .password,
+                    user: (.user // .login)
+                }
+            ]
+        else . end
+    ' "$config_file" > "$temp_config"
+
+    # Validate normalized config
+    if validate_config "$temp_config"; then
+        cp "$temp_config" "$config_file"
+        print_success "Config normalized successfully!"
+        print_info "All connectTo entries now have only: password, publicKey"
+        print_info "All authorizedPasswords now have only: password, user"
+    else
+        print_error "Normalization failed validation - config NOT modified"
+        print_info "Original config is safe at: $config_file"
+        print_info "Backup is at: $backup"
+        return 1
+    fi
+
+    return 0
+}
+
 # Peer Adding Wizard - Main automated workflow
 peer_adding_wizard() {
     clear
@@ -340,6 +445,10 @@ peer_adding_wizard() {
 
     print_info "This wizard will guide you through discovering, testing, and adding peers."
     echo
+
+    # Verify config structure
+    local ipv4_interface_exists=$(jq -e '.interfaces.UDPInterface[0]' "$CJDNS_CONFIG" &>/dev/null && echo 1 || echo 0)
+    local ipv6_interface_exists=$(jq -e '.interfaces.UDPInterface[1]' "$CJDNS_CONFIG" &>/dev/null && echo 1 || echo 0)
 
     # Step 1: Ask protocol selection
     print_subheader "Step 1: Protocol Selection"
@@ -352,19 +461,100 @@ peer_adding_wizard() {
 
     local protocol
     while true; do
-        read -p "Enter selection (4/6/B/0): " -r protocol
+        read -p "Enter selection (4/6/B/0): " -r protocol < /dev/tty
         case "$protocol" in
             4|[Ii][Pp][Vv]4)
+                if [ "$ipv4_interface_exists" -eq 0 ]; then
+                    print_error "IPv4 interface (UDPInterface[0]) not found in config!"
+                    continue
+                fi
                 protocol="ipv4"
                 print_success "IPv4 only selected"
                 break
                 ;;
             6|[Ii][Pp][Vv]6)
+                if [ "$ipv6_interface_exists" -eq 0 ]; then
+                    print_warning "IPv6 interface (UDPInterface[1]) not found in config"
+                    echo
+
+                    # Test IPv6 connectivity
+                    print_info "Testing IPv6 connectivity..."
+                    if ping6 -c 1 -W 2 google.com &>/dev/null 2>&1 || ping6 -c 1 -W 2 2001:4860:4860::8888 &>/dev/null 2>&1; then
+                        print_success "IPv6 connectivity detected on your system"
+                    else
+                        print_warning "IPv6 connectivity NOT detected on your system"
+                        print_info "You may not have IPv6 available, or it may be blocked"
+                    fi
+                    echo
+
+                    print_info "IPv6 interface is needed to add IPv6 peers"
+                    if ! ask_yes_no "Would you like to create an IPv6 interface now?"; then
+                        print_info "Cannot continue without IPv6 interface"
+                        continue
+                    fi
+
+                    # Create IPv6 interface
+                    echo
+                    print_info "Creating IPv6 interface in config..."
+                    print_info "You'll need your IPv6 bind address (e.g., [::]:PORT or [your-ipv6]:PORT)"
+                    echo
+                    local ipv6_bind=$(ask_input "Enter IPv6 bind address" "[::]:46010")
+
+                    # Add IPv6 interface to config
+                    local temp_config="$WORK_DIR/config_ipv6_add.json"
+                    jq --arg bind "$ipv6_bind" '.interfaces.UDPInterface[1] = {"bind": $bind, "connectTo": {}}' "$CJDNS_CONFIG" > "$temp_config"
+
+                    if validate_config "$temp_config"; then
+                        cp "$temp_config" "$CJDNS_CONFIG"
+                        print_success "IPv6 interface created successfully"
+                        ipv6_interface_exists=1
+                    else
+                        print_error "Failed to create IPv6 interface - config validation failed"
+                        continue
+                    fi
+                fi
                 protocol="ipv6"
                 print_success "IPv6 only selected"
                 break
                 ;;
             [Bb]|[Bb][Oo][Tt][Hh])
+                if [ "$ipv4_interface_exists" -eq 0 ] || [ "$ipv6_interface_exists" -eq 0 ]; then
+                    print_warning "Not all interfaces available in config"
+                    print_info "IPv4: $([ "$ipv4_interface_exists" -eq 1 ] && echo "✓ Available" || echo "✗ Missing")"
+                    print_info "IPv6: $([ "$ipv6_interface_exists" -eq 1 ] && echo "✓ Available" || echo "✗ Missing")"
+
+                    if [ "$ipv6_interface_exists" -eq 0 ]; then
+                        echo
+                        print_info "You can create the missing IPv6 interface, or select IPv4 only"
+                        if ask_yes_no "Create IPv6 interface now?"; then
+                            # Test IPv6 connectivity
+                            echo
+                            print_info "Testing IPv6 connectivity..."
+                            if ping6 -c 1 -W 2 google.com &>/dev/null 2>&1 || ping6 -c 1 -W 2 2001:4860:4860::8888 &>/dev/null 2>&1; then
+                                print_success "IPv6 connectivity detected"
+                            else
+                                print_warning "IPv6 connectivity NOT detected - interface may not work"
+                            fi
+
+                            echo
+                            local ipv6_bind=$(ask_input "Enter IPv6 bind address" "[::]:46010")
+
+                            local temp_config="$WORK_DIR/config_ipv6_add.json"
+                            jq --arg bind "$ipv6_bind" '.interfaces.UDPInterface[1] = {"bind": $bind, "connectTo": {}}' "$CJDNS_CONFIG" > "$temp_config"
+
+                            if validate_config "$temp_config"; then
+                                cp "$temp_config" "$CJDNS_CONFIG"
+                                print_success "IPv6 interface created"
+                                ipv6_interface_exists=1
+                            else
+                                print_error "Failed to create IPv6 interface"
+                                continue
+                            fi
+                        else
+                            continue
+                        fi
+                    fi
+                fi
                 protocol="both"
                 print_success "Both IPv4 and IPv6 selected"
                 break
@@ -384,14 +574,43 @@ peer_adding_wizard() {
 
     # Step 2: Update local address database
     print_subheader "Step 2: Updating Local Address Database"
-    print_info "Fetching latest peers from online sources..."
+    echo
+    print_bold "Fetching latest addresses from online sources..."
+    echo
 
     local result=$(update_master_list)
     local master_ipv4=$(echo "$result" | cut -d'|' -f1)
     local master_ipv6=$(echo "$result" | cut -d'|' -f2)
 
-    print_success "Local Address Database updated: $master_ipv4 IPv4, $master_ipv6 IPv6 peers"
     echo
+    print_bold "✓ Local Address Database updated"
+    echo -e "  ${YELLOW}$master_ipv4${NC} IPv4 addresses found"
+    echo -e "  ${ORANGE}$master_ipv6${NC} IPv6 addresses found"
+    echo
+
+    # Check if config needs normalization before comparing with database
+    if ! check_config_normalized "$CJDNS_CONFIG"; then
+        echo
+        print_subheader "Config Normalization"
+        echo
+        print_warning "Your config contains extra metadata fields that cjdns doesn't use"
+        print_info "Normalizing will:"
+        echo "  • Keep only required fields (password, publicKey) in connectTo entries"
+        echo "  • Remove metadata like peerName, contact, location, login, gpg"
+        echo "  • Ensure accurate duplicate detection (prevents false positives)"
+        echo "  • Make config smaller and more reliable"
+        echo
+        print_info "This is safe and recommended - your working peers won't be affected"
+        echo
+
+        if ask_yes_no "Normalize config now?"; then
+            normalize_config "$CJDNS_CONFIG"
+        else
+            print_warning "Skipping normalization - you may see false 'credential updates'"
+            print_info "You can normalize later from 'Edit Config File' → 'Cleanup/Normalize Config'"
+        fi
+        echo
+    fi
 
     # Step 3: Filter for new peers
     print_subheader "Step 3: Finding New Peers"
@@ -416,19 +635,19 @@ peer_adding_wizard() {
         echo "{}" > "$discovered_ipv6"
     fi
 
-    # Smart duplicate detection
+    # Smart duplicate detection (non-interactive mode - just collect data)
     local new_counts_ipv4="0|0"
     local new_counts_ipv6="0|0"
 
     if [ "$protocol" = "ipv4" ] || [ "$protocol" = "both" ]; then
-        new_counts_ipv4=$(smart_duplicate_check "$discovered_ipv4" "$CJDNS_CONFIG" 0 "$new_ipv4" "$updates_ipv4")
+        new_counts_ipv4=$(smart_duplicate_check "$discovered_ipv4" "$CJDNS_CONFIG" 0 "$new_ipv4" "$updates_ipv4" 0)
     else
         echo "{}" > "$new_ipv4"
         echo "{}" > "$updates_ipv4"
     fi
 
     if [ "$protocol" = "ipv6" ] || [ "$protocol" = "both" ]; then
-        new_counts_ipv6=$(smart_duplicate_check "$discovered_ipv6" "$CJDNS_CONFIG" 1 "$new_ipv6" "$updates_ipv6")
+        new_counts_ipv6=$(smart_duplicate_check "$discovered_ipv6" "$CJDNS_CONFIG" 1 "$new_ipv6" "$updates_ipv6" 0)
     else
         echo "{}" > "$new_ipv6"
         echo "{}" > "$updates_ipv6"
@@ -439,8 +658,47 @@ peer_adding_wizard() {
     local new_ipv6_count=$(echo "$new_counts_ipv6" | cut -d'|' -f1)
     local update_ipv6_count=$(echo "$new_counts_ipv6" | cut -d'|' -f2)
 
-    print_success "New peers: $new_ipv4_count IPv4, $new_ipv6_count IPv6"
-    print_info "Updates: $update_ipv4_count IPv4, $update_ipv6_count IPv6"
+    echo
+    echo "Summary:"
+    echo -e "  ${YELLOW}$new_ipv4_count${NC} new IPv4 peers not in config"
+    echo -e "  ${ORANGE}$new_ipv6_count${NC} new IPv6 peers not in config"
+    if [ "$update_ipv4_count" -gt 0 ] || [ "$update_ipv6_count" -gt 0 ]; then
+        echo
+        print_warning "═══════════════════════════════════════════════════════════════"
+        print_warning "  Peers with updated credentials detected!"
+        print_warning "═══════════════════════════════════════════════════════════════"
+        echo
+        print_info "These peers are ALREADY in your config, but have newer metadata in the database:"
+        echo
+
+        # List IPv4 peers with updates
+        if [ "$update_ipv4_count" -gt 0 ]; then
+            echo -e "${YELLOW}IPv4 peers with updates ($update_ipv4_count):${NC}"
+            jq -r 'keys[]' "$updates_ipv4" 2>/dev/null | while IFS= read -r addr; do
+                echo -e "  ${YELLOW}•${NC} $addr"
+            done
+            echo
+        fi
+
+        # List IPv6 peers with updates
+        if [ "$update_ipv6_count" -gt 0 ]; then
+            echo -e "${ORANGE}IPv6 peers with updates ($update_ipv6_count):${NC}"
+            jq -r 'keys[]' "$updates_ipv6" 2>/dev/null | while IFS= read -r addr; do
+                echo -e "  ${ORANGE}•${NC} $addr"
+            done
+            echo
+        fi
+
+        echo -e "${DIM}These updates may include changes to: peerName, contact, location, gpg, etc.${NC}"
+        echo -e "${DIM}(The password and publicKey remain the same - only metadata is updated)${NC}"
+        echo
+
+        # Always offer to show detailed preview
+        if ask_yes_no "View detailed credential differences?"; then
+            wizard_preview_updates "$updates_ipv4" "$updates_ipv6" "$CJDNS_CONFIG"
+            echo
+        fi
+    fi
     echo
 
     if [ "$new_ipv4_count" -eq 0 ] && [ "$new_ipv6_count" -eq 0 ]; then
@@ -479,8 +737,9 @@ peer_adding_wizard() {
     local inactive_ipv6_count=$(jq 'length' "$inactive_ipv6")
 
     echo
-    print_success "Active: $active_ipv4_count IPv4, $active_ipv6_count IPv6"
-    print_warning "Inactive: $inactive_ipv4_count IPv4, $inactive_ipv6_count IPv6"
+    echo "Local address database test results:"
+    print_success "  Active: $active_ipv4_count IPv4, $active_ipv6_count IPv6"
+    print_warning "  Inactive: $inactive_ipv4_count IPv4, $inactive_ipv6_count IPv6"
     echo
 
     # Step 5: Selection options
@@ -605,7 +864,7 @@ wizard_select_and_add() {
 
     local selection
     while true; do
-        read -p "Enter selection: " -r selection
+        read -p "Enter selection: " -r selection < /dev/tty < /dev/tty
         case "$selection" in
             [Aa])
                 wizard_add_peers "$active_ipv4" "$active_ipv6" "$updates_ipv4" "$updates_ipv6" \
@@ -733,28 +992,42 @@ wizard_add_peers() {
         fi
     fi
 
-    # Apply updates
-    if [ "$update_ipv4_count" -gt 0 ]; then
-        echo -n "Applying IPv4 credential updates... "
-        if apply_peer_updates "$temp_config" "$updates_ipv4" 0 "$temp_config.new"; then
-            mv "$temp_config.new" "$temp_config"
-            echo -e "${GREEN}✓${NC}"
-            print_success "Updated $update_ipv4_count IPv4 peer credentials"
-        else
-            echo -e "${RED}✗${NC}"
-            print_warning "Failed to apply some IPv4 updates (continuing anyway)"
-        fi
-    fi
+    # Ask about credential updates
+    echo
+    if [ "$update_ipv4_count" -gt 0 ] || [ "$update_ipv6_count" -gt 0 ]; then
+        print_subheader "Credential Updates"
+        print_info "You have $update_ipv4_count IPv4 and $update_ipv6_count IPv6 credential updates available"
+        print_info "These are for peers ALREADY in your config with newer metadata"
+        echo
+        if ask_yes_no "Also apply credential updates while adding new peers?"; then
+            if [ "$update_ipv4_count" -gt 0 ]; then
+                echo -n "Applying IPv4 credential updates... "
+                if apply_peer_updates "$temp_config" "$updates_ipv4" 0 "$temp_config.new"; then
+                    mv "$temp_config.new" "$temp_config"
+                    echo -e "${GREEN}✓${NC}"
+                    print_success "Updated $update_ipv4_count IPv4 peer credentials"
+                else
+                    echo -e "${RED}✗${NC}"
+                    print_warning "Failed to apply some IPv4 updates (continuing anyway)"
+                fi
+            fi
 
-    if [ "$update_ipv6_count" -gt 0 ]; then
-        echo -n "Applying IPv6 credential updates... "
-        if apply_peer_updates "$temp_config" "$updates_ipv6" 1 "$temp_config.new"; then
-            mv "$temp_config.new" "$temp_config"
-            echo -e "${GREEN}✓${NC}"
-            print_success "Updated $update_ipv6_count IPv6 peer credentials"
+            if [ "$update_ipv6_count" -gt 0 ]; then
+                echo -n "Applying IPv6 credential updates... "
+                if apply_peer_updates "$temp_config" "$updates_ipv6" 1 "$temp_config.new"; then
+                    mv "$temp_config.new" "$temp_config"
+                    echo -e "${GREEN}✓${NC}"
+                    print_success "Updated $update_ipv6_count IPv6 peer credentials"
+                else
+                    echo -e "${RED}✗${NC}"
+                    print_warning "Failed to apply some IPv6 updates (continuing anyway)"
+                fi
+            fi
         else
-            echo -e "${RED}✗${NC}"
-            print_warning "Failed to apply some IPv6 updates (continuing anyway)"
+            print_info "Skipping credential updates (only adding new peers)"
+            # Zero out the counts so the summary is accurate
+            update_ipv4_count=0
+            update_ipv6_count=0
         fi
     fi
 
@@ -795,6 +1068,97 @@ wizard_add_peers() {
         echo "  • Invalid JSON was generated (please report this as a bug)"
         echo "  • Your config file has structural issues"
     fi
+}
+
+# Wizard helper: preview credential updates
+wizard_preview_updates() {
+    local updates_ipv4="$1"
+    local updates_ipv6="$2"
+    local config_file="$3"
+
+    print_subheader "Credential Update Preview"
+    echo
+    print_info "Showing differences between current config and updated database info:"
+    echo
+
+    # Show IPv4 updates
+    local ipv4_addrs=$(jq -r 'keys[]' "$updates_ipv4" 2>/dev/null)
+    if [ -n "$ipv4_addrs" ]; then
+        echo -e "${YELLOW}═══ IPv4 Updates ═══${NC}"
+        echo
+        local count=1
+        while IFS= read -r addr; do
+            [ -z "$addr" ] && continue
+
+            echo -e "${BOLD}[$count] $addr${NC}"
+            echo
+
+            local current=$(jq --arg addr "$addr" '.interfaces.UDPInterface[0].connectTo[$addr]' "$config_file")
+            local new=$(jq --arg addr "$addr" '.[$addr]' "$updates_ipv4")
+
+            # Show all fields from both, highlighting differences
+            local all_keys=$(echo "$current $new" | jq -s 'map(keys) | add | unique | .[]' -r)
+
+            while IFS= read -r key; do
+                [ -z "$key" ] && continue
+
+                local current_val=$(echo "$current" | jq -r --arg k "$key" '.[$k] // "N/A"')
+                local new_val=$(echo "$new" | jq -r --arg k "$key" '.[$k] // "N/A"')
+
+                if [ "$current_val" != "$new_val" ]; then
+                    echo -e "  ${RED}$key:${NC}"
+                    echo -e "    ${DIM}Current:${NC} $current_val"
+                    echo -e "    ${GREEN}New:${NC}     $new_val"
+                else
+                    echo -e "  ${DIM}$key: $current_val${NC}"
+                fi
+            done <<< "$all_keys"
+
+            echo
+            count=$((count + 1))
+        done <<< "$ipv4_addrs"
+    fi
+
+    # Show IPv6 updates
+    local ipv6_addrs=$(jq -r 'keys[]' "$updates_ipv6" 2>/dev/null)
+    if [ -n "$ipv6_addrs" ]; then
+        echo -e "${ORANGE}═══ IPv6 Updates ═══${NC}"
+        echo
+        local count=1
+        while IFS= read -r addr; do
+            [ -z "$addr" ] && continue
+
+            echo -e "${BOLD}[$count] $addr${NC}"
+            echo
+
+            local current=$(jq --arg addr "$addr" '.interfaces.UDPInterface[1].connectTo[$addr]' "$config_file")
+            local new=$(jq --arg addr "$addr" '.[$addr]' "$updates_ipv6")
+
+            # Show all fields from both, highlighting differences
+            local all_keys=$(echo "$current $new" | jq -s 'map(keys) | add | unique | .[]' -r)
+
+            while IFS= read -r key; do
+                [ -z "$key" ] && continue
+
+                local current_val=$(echo "$current" | jq -r --arg k "$key" '.[$k] // "N/A"')
+                local new_val=$(echo "$new" | jq -r --arg k "$key" '.[$k] // "N/A"')
+
+                if [ "$current_val" != "$new_val" ]; then
+                    echo -e "  ${RED}$key:${NC}"
+                    echo -e "    ${DIM}Current:${NC} $current_val"
+                    echo -e "    ${GREEN}New:${NC}     $new_val"
+                else
+                    echo -e "  ${DIM}$key: $current_val${NC}"
+                fi
+            done <<< "$all_keys"
+
+            echo
+            count=$((count + 1))
+        done <<< "$ipv6_addrs"
+    fi
+
+    echo
+    read -p "Press Enter to continue..."
 }
 
 # Wizard helper: apply credential updates
@@ -1008,42 +1372,20 @@ add_single_peer() {
     print_ascii_header
     print_header "Add Single Peer"
 
-    print_info "Enter peer details (all fields are optional except address, password, and publicKey)"
+    print_info "Enter peer connection details"
+    print_info "Only password and publicKey are required - cjdns doesn't use metadata fields"
     echo
 
     local address=$(ask_input "Peer address (IP:PORT or [IPv6]:PORT)")
     local password=$(ask_input "Password")
     local publicKey=$(ask_input "Public key")
 
-    echo
-    print_info "Optional fields (press Enter to skip):"
-    local peerName=$(ask_input "Peer name" "")
-    local login=$(ask_input "Login" "")
-    local contact=$(ask_input "Contact" "")
-    local location=$(ask_input "Location" "")
-    local gpg=$(ask_input "GPG" "")
-
-    # Build JSON
+    # Build minimal JSON - only password and publicKey
+    # Metadata fields (peerName, contact, location, etc.) are not written to config
     local peer_json=$(jq -n \
         --arg pw "$password" \
         --arg pk "$publicKey" \
         '{password: $pw, publicKey: $pk}')
-
-    if [ -n "$peerName" ]; then
-        peer_json=$(echo "$peer_json" | jq --arg pn "$peerName" '. + {peerName: $pn}')
-    fi
-    if [ -n "$login" ]; then
-        peer_json=$(echo "$peer_json" | jq --arg l "$login" '. + {login: $l}')
-    fi
-    if [ -n "$contact" ]; then
-        peer_json=$(echo "$peer_json" | jq --arg c "$contact" '. + {contact: $c}')
-    fi
-    if [ -n "$location" ]; then
-        peer_json=$(echo "$peer_json" | jq --arg loc "$location" '. + {location: $loc}')
-    fi
-    if [ -n "$gpg" ]; then
-        peer_json=$(echo "$peer_json" | jq --arg g "$gpg" '. + {gpg: $g}')
-    fi
 
     # Show review
     echo
@@ -1202,7 +1544,7 @@ remove_peers_menu() {
     echo
 
     local selection
-    read -p "Selection: " -r selection
+    read -p "Selection: " -r selection < /dev/tty
 
     if [ -z "$selection" ]; then
         print_info "Cancelled"
@@ -1411,7 +1753,7 @@ configuration_settings_menu() {
         echo
 
         local choice
-        read -p "Enter choice: " choice
+        read -p "Enter choice: " choice < /dev/tty < /dev/tty
 
         case "$choice" in
             1) change_config_location ;;
@@ -1466,7 +1808,7 @@ peer_sources_menu() {
         echo
 
         local choice
-        read -p "Enter choice: " choice
+        read -p "Enter choice: " choice < /dev/tty < /dev/tty
 
         case "$choice" in
             1) toggle_peer_source_menu ;;
@@ -1494,7 +1836,7 @@ database_management_menu() {
         echo
 
         local choice
-        read -p "Enter choice: " choice
+        read -p "Enter choice: " choice < /dev/tty < /dev/tty
 
         case "$choice" in
             1) database_backup_menu ;;
@@ -1533,7 +1875,7 @@ file_management_menu() {
         echo
 
         local choice
-        read -p "Enter choice: " choice
+        read -p "Enter choice: " choice < /dev/tty < /dev/tty
 
         case "$choice" in
             1) interactive_file_deletion "backup" ;;
@@ -1565,7 +1907,7 @@ maintenance_menu() {
         echo
 
         local choice
-        read -p "Enter choice: " choice
+        read -p "Enter choice: " choice < /dev/tty < /dev/tty
 
         case "$choice" in
             1) configuration_settings_menu ;;
@@ -1663,7 +2005,7 @@ toggle_peer_source_menu() {
     echo
 
     local choice
-    read -p "Enter choice: " choice
+    read -p "Enter choice: " choice < /dev/tty
 
     if [ "$choice" = "0" ] || [ "$choice" -lt 1 ] || [ "$choice" -ge $count ]; then
         return
@@ -1692,7 +2034,7 @@ add_peer_source_menu() {
 
     # Get source name
     echo "Enter source name (e.g., 'my-peers'):"
-    read -p "> " name
+    read -p "> " name < /dev/tty
     [ -z "$name" ] && return
 
     # Get source type
@@ -1702,7 +2044,7 @@ add_peer_source_menu() {
     echo "  2) Direct JSON URL"
     echo "  0) Cancel"
     echo
-    read -p "Enter choice: " type_choice
+    read -p "Enter choice: " type_choice < /dev/tty
 
     local type
     case "$type_choice" in
@@ -1718,7 +2060,7 @@ add_peer_source_menu() {
     else
         echo "Enter direct JSON URL:"
     fi
-    read -p "> " url
+    read -p "> " url < /dev/tty
     [ -z "$url" ] && return
 
     # Add to sources
@@ -1758,7 +2100,7 @@ remove_peer_source_menu() {
     echo
 
     local choice
-    read -p "Enter choice: " choice
+    read -p "Enter choice: " choice < /dev/tty
 
     if [ "$choice" = "0" ] || [ "$choice" -lt 1 ] || [ "$choice" -ge $count ]; then
         return
@@ -1909,7 +2251,7 @@ database_restore_menu() {
 
     local choice
     while true; do
-        read -p "Select backup to restore (0-${#backups[@]}): " choice
+        read -p "Select backup to restore (0-${#backups[@]}): " choice < /dev/tty
 
         if [ "$choice" = "0" ]; then
             print_info "Cancelled"
@@ -2008,7 +2350,7 @@ import_peers_menu() {
 
         local choice
         while true; do
-            read -p "Select file to import (0-${#exports[@]}, or 'q' to quit): " choice
+            read -p "Select file to import (0-${#exports[@]}, or 'q' to quit): " choice < /dev/tty
 
             if [[ "$choice" == "q" ]] || [[ "$choice" == "Q" ]]; then
                 return
@@ -2029,7 +2371,7 @@ import_peers_menu() {
         echo "Enter path to JSON file (example: $export_dir/ipv4_peers_*.json)"
         echo "or press Ctrl+C to cancel"
         echo
-        read -p "File path: " -r file_path
+        read -p "File path: " -r file_path < /dev/tty
 
         if [ -z "$file_path" ]; then
             print_error "No file specified"
@@ -2149,7 +2491,7 @@ export_peers_menu() {
     echo
 
     local selection
-    read -p "Enter selection: " -r selection
+    read -p "Enter selection: " -r selection < /dev/tty
 
     # Handle exit
     if [[ "$selection" == "0" ]] || [[ "$selection" =~ ^[Qq]$ ]]; then
@@ -2259,7 +2601,7 @@ restore_config_menu() {
 
     local choice
     while true; do
-        read -p "Select backup to restore (0-${#backups[@]}): " choice
+        read -p "Select backup to restore (0-${#backups[@]}): " choice < /dev/tty
 
         if [ "$choice" = "0" ]; then
             return
@@ -2357,7 +2699,7 @@ main() {
         show_menu
 
         local choice
-        read -p "Enter choice: " choice
+        read -p "Enter choice: " choice < /dev/tty < /dev/tty < /dev/tty
 
         case "$choice" in
             1) peer_adding_wizard ;;

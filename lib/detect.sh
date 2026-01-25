@@ -95,3 +95,67 @@ test_cjdnstool_connection() {
 
     return 1
 }
+
+# Auto-detect cjdroute binary location
+detect_cjdroute_binary() {
+    local cjdroute_path=""
+
+    # Method 1: Check if cjdroute is in PATH
+    if cjdroute_path=$(command -v cjdroute 2>/dev/null); then
+        echo "$cjdroute_path"
+        return 0
+    fi
+
+    # Method 2: Extract from systemd service file (if service is known)
+    if [ -n "${1:-}" ]; then
+        local service_name="$1"
+        local service_file="/etc/systemd/system/$service_name"
+
+        if [ -f "$service_file" ]; then
+            # Extract cjdroute path from ExecStart line
+            # Example: ExecStart=/bin/sh -c /usr/local/bin/cjdroute < /etc/cjdroute.conf
+            cjdroute_path=$(grep -oP 'ExecStart=.*?\K(/[^ ]+/cjdroute)\b' "$service_file" 2>/dev/null | head -1)
+
+            if [ -n "$cjdroute_path" ] && [ -x "$cjdroute_path" ]; then
+                echo "$cjdroute_path"
+                return 0
+            fi
+        fi
+
+        # Also try systemctl show to get ExecStart
+        local exec_start=$(systemctl show "$service_name" -p ExecStart --value 2>/dev/null)
+        if [ -n "$exec_start" ]; then
+            # Parse out the cjdroute path from the ExecStart command
+            cjdroute_path=$(echo "$exec_start" | grep -oP '/[^ ]+/cjdroute\b' | head -1)
+
+            if [ -n "$cjdroute_path" ] && [ -x "$cjdroute_path" ]; then
+                echo "$cjdroute_path"
+                return 0
+            fi
+        fi
+    fi
+
+    # Method 3: Find in common installation directories
+    local search_dirs=("/usr/local/bin" "/usr/bin" "/opt/cjdns" "/opt/cjdns/bin")
+    for dir in "${search_dirs[@]}"; do
+        if [ -x "$dir/cjdroute" ]; then
+            echo "$dir/cjdroute"
+            return 0
+        fi
+    done
+
+    # Method 4: Use find as last resort (slower but comprehensive)
+    # Search in /usr, /opt, and /home but limit depth to avoid slow scans
+    for base_dir in /usr /opt; do
+        if [ -d "$base_dir" ]; then
+            cjdroute_path=$(find "$base_dir" -maxdepth 4 -type f -name "cjdroute" -executable 2>/dev/null | head -1)
+            if [ -n "$cjdroute_path" ]; then
+                echo "$cjdroute_path"
+                return 0
+            fi
+        fi
+    done
+
+    # Not found
+    return 1
+}
