@@ -39,9 +39,9 @@ interactive_peer_management() {
     fi
 
     # Build arrays for gum display
-    declare -a peer_options
-    declare -a peer_addresses
-    declare -a unresponsive_indices  # Track which indices are unresponsive
+    declare -a peer_options=()
+    declare -a peer_addresses=()
+    declare -a unresponsive_indices=()  # Track which indices are unresponsive
     local all_peers=$(get_all_peers_by_quality)
 
     # Add peers from database (with quality info)

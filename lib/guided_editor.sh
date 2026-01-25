@@ -1390,11 +1390,11 @@ regenerate_identity() {
 
     print_bold "Current Identity:"
     echo
-    echo "┌──────────────────────────────────────────────────────────────────────────────┐"
-    printf "│ %-12s %-64s │\n" "Private Key:" "${current_privkey:0:40}..."
-    printf "│ %-12s %-64s │\n" "Public Key:" "$current_pubkey"
-    printf "│ %-12s %-64s │\n" "IPv6:" "$current_ipv6"
-    echo "└──────────────────────────────────────────────────────────────────────────────┘"
+    echo "┌─────────────────────────────────────────────────────────────────────────────┐"
+    printf "│ %-12s %-63s │\n" "Private Key:" "${current_privkey:0:40}..."
+    printf "│ %-12s %-63s │\n" "Public Key:" "$current_pubkey"
+    printf "│ %-12s %-63s │\n" "IPv6:" "$current_ipv6"
+    echo "└─────────────────────────────────────────────────────────────────────────────┘"
     echo
     echo
     echo -e "${RED}${BOLD}╔══════════════════════════════════════════════════════════════════════════════╗${NC}"
@@ -1408,7 +1408,7 @@ regenerate_identity() {
     printf "${RED}${BOLD}║    Currently: %-63s║${NC}\n" "$current_ipv6"
     echo -e "${RED}${BOLD}║                                                                              ║${NC}"
     echo -e "${RED}${BOLD}║  • ALL peers who connect TO you will need your NEW credentials               ║${NC}"
-    echo -e "${RED}${BOLD}║    (new publicKey)                                                            ║${NC}"
+    echo -e "${RED}${BOLD}║    (new publicKey)                                                           ║${NC}"
     echo -e "${RED}${BOLD}║                                                                              ║${NC}"
     echo -e "${RED}${BOLD}║  • If you advertise your FC address ANYWHERE, it must be updated:            ║${NC}"
     echo -e "${RED}${BOLD}║    - Bitcoin Core config (bitcoin.conf) - needs update AND restart           ║${NC}"

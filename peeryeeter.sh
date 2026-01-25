@@ -1687,9 +1687,16 @@ view_peer_status() {
         update_peer_state "$address" "$state"
     done < "$peer_states"
 
-    local total=$(wc -l < "$peer_states")
-    local established=$(grep -c "^ESTABLISHED|" "$peer_states" || echo 0)
-    local unresponsive=$(grep -c "^UNRESPONSIVE|" "$peer_states" || echo 0)
+    local total=$(wc -l < "$peer_states" 2>/dev/null || echo 0)
+    local established=$(grep -c "^ESTABLISHED|" "$peer_states" 2>/dev/null || echo 0)
+    local unresponsive=$(grep -c "^UNRESPONSIVE|" "$peer_states" 2>/dev/null || echo 0)
+    # Ensure numeric values
+    total=${total//[^0-9]/}
+    established=${established//[^0-9]/}
+    unresponsive=${unresponsive//[^0-9]/}
+    [ -z "$total" ] && total=0
+    [ -z "$established" ] && established=0
+    [ -z "$unresponsive" ] && unresponsive=0
     local other=$((total - established - unresponsive))
 
     echo "Total peers: $total"
