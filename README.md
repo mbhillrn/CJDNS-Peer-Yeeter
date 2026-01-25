@@ -16,7 +16,7 @@ A powerful interactive tool for managing CJDNS peers. Automatically discovers pe
 ### System Dependencies
 
 ```bash
-sudo apt-get install jq git wget sqlite3
+sudo apt-get install jq git wget curl sqlite3
 ```
 
 ### cjdnstool (Required)
@@ -24,7 +24,7 @@ sudo apt-get install jq git wget sqlite3
 You need cjdnstool to communicate with your cjdns instance:
 - https://github.com/furetosan/cjdnstool
 
-### gum (Interactive UI)
+### gum (Required - Interactive UI)
 
 The tool will offer to install gum automatically on first run, or install manually:
 
@@ -34,6 +34,13 @@ curl -fsSL https://repo.charm.sh/apt/gpg.key | sudo gpg --dearmor -o /etc/apt/ke
 echo "deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *" | sudo tee /etc/apt/sources.list.d/charm.list
 sudo apt update && sudo apt install gum
 ```
+
+### Optional Tools
+
+These enhance the experience but aren't required:
+
+- **fx** - Interactive JSON viewer/editor with mouse support (install via `sudo snap install fx`)
+- **fzf** - Fuzzy finder for file selection (install via `sudo apt install fzf`)
 
 ## Installation
 
