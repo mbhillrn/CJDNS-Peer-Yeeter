@@ -14,8 +14,11 @@ interactive_peer_management() {
     local peer_states="$WORK_DIR/peer_states.txt"
     get_current_peer_states "$ADMIN_IP" "$ADMIN_PORT" "$ADMIN_PASSWORD" "$peer_states"
 
-    # Update database with current states (format is STATE|ADDRESS|SOURCE)
+    # Build lookup of address -> source (config/dns) from peer_states
+    declare -A peer_source_map
     while IFS='|' read -r state address source; do
+        [ -z "$address" ] && continue
+        peer_source_map["$address"]="$source"
         update_peer_state "$address" "$state"
     done < "$peer_states"
 
@@ -31,18 +34,16 @@ interactive_peer_management() {
         [ -n "$addr" ] && all_config_peers+=("$addr")
     done < <(jq -r '.interfaces.UDPInterface[1].connectTo // {} | keys[]' "$CJDNS_CONFIG" 2>/dev/null)
 
-    if [ ${#all_config_peers[@]} -eq 0 ]; then
-        print_warning "No peers found in config"
-        echo
-        read -p "Press Enter to continue..."
-        return
-    fi
-
     # Build arrays for gum display
     declare -a peer_options=()
     declare -a peer_addresses=()
+    declare -a peer_sources=()  # Track source for each peer
     declare -a unresponsive_indices=()  # Track which indices are unresponsive
     local all_peers=$(get_all_peers_by_quality)
+
+    # Count stats
+    local config_count=0
+    local dns_count=0
 
     # Add peers from database (with quality info)
     local idx=0
@@ -53,19 +54,39 @@ interactive_peer_management() {
         local time_in_state=$(time_since "$last_change")
         local status_icon
 
+        # Determine source - check peer_source_map first, then fall back to config check
+        local source="${peer_source_map[$address]:-}"
+        if [ -z "$source" ]; then
+            # Check if in config peers array
+            local in_config=false
+            local normalized_addr=$(normalize_ipv6_address "$address")
+            for cfg_addr in "${all_config_peers[@]}"; do
+                local normalized_cfg=$(normalize_ipv6_address "$cfg_addr")
+                if [ "$normalized_addr" = "$normalized_cfg" ]; then
+                    in_config=true
+                    break
+                fi
+            done
+            [ "$in_config" = true ] && source="config" || source="dns"
+        fi
+
+        local source_tag="[DNS]"
+        [ "$source" = "config" ] && source_tag="[CFG]" && config_count=$((config_count + 1)) || dns_count=$((dns_count + 1))
+
         if [ "$state" = "ESTABLISHED" ]; then
             status_icon="✓"
-            peer_options+=("$status_icon $address | Q:$quality_display Est:$est_count Unr:$unr_count | Established $time_in_state")
+            peer_options+=("$status_icon $source_tag $address | Q:$quality_display Est:$est_count Unr:$unr_count | Established $time_in_state")
         elif [ "$state" = "UNRESPONSIVE" ]; then
             status_icon="✗"
-            peer_options+=("$status_icon $address | Q:$quality_display Est:$est_count Unr:$unr_count | Unresponsive $time_in_state (${consecutive}x)")
-            unresponsive_indices+=("$idx")
+            peer_options+=("$status_icon $source_tag $address | Q:$quality_display Est:$est_count Unr:$unr_count | Unresponsive $time_in_state (${consecutive}x)")
+            [ "$source" = "config" ] && unresponsive_indices+=("$idx")
         else
             status_icon="?"
-            peer_options+=("$status_icon $address | Q:$quality_display Est:$est_count Unr:$unr_count | $state $time_in_state")
+            peer_options+=("$status_icon $source_tag $address | Q:$quality_display Est:$est_count Unr:$unr_count | $state $time_in_state")
         fi
 
         peer_addresses+=("$address")
+        peer_sources+=("$source")
         idx=$((idx + 1))
     done <<< "$all_peers"
 
@@ -82,14 +103,15 @@ interactive_peer_management() {
         done
 
         if [ "$already_added" = false ]; then
-            peer_options+=("○ $config_addr | Awaiting first check")
+            peer_options+=("○ [CFG] $config_addr | Awaiting first check")
             peer_addresses+=("$config_addr")
+            peer_sources+=("config")
+            config_count=$((config_count + 1))
         fi
     done
 
-    # Check if we have any options
     if [ ${#peer_options[@]} -eq 0 ]; then
-        print_error "No peers found to display"
+        print_warning "No peers found"
         echo
         read -p "Press Enter to continue..."
         return
@@ -101,7 +123,11 @@ interactive_peer_management() {
     [ $gum_height -lt 10 ] && gum_height=10
 
     # Use gum to select peers
-    print_success "Found ${#peer_addresses[@]} peers in config (${#unresponsive_indices[@]} unresponsive)"
+    print_success "Found ${#peer_addresses[@]} peers total: $config_count [CFG] in config, $dns_count [DNS] discovered"
+    print_info "[CFG] peers can be removed, [DNS] peers are runtime-only"
+    if [ ${#unresponsive_indices[@]} -gt 0 ]; then
+        print_warning "${#unresponsive_indices[@]} unresponsive config peers"
+    fi
     echo
 
     local selected=""
@@ -173,12 +199,26 @@ interactive_peer_management() {
         break
     done
 
-    # Parse selected peers
+    # Parse selected peers - extract address and determine source
     declare -a selected_addresses
+    declare -a selected_sources
+    declare -a config_addresses  # Only config peers can be removed
+    declare -a dns_addresses     # DNS peers - just for display
+
     while IFS= read -r line; do
-        # Extract address from the display string (between icon and first |)
-        local addr=$(echo "$line" | sed -E 's/^[✓✗?○] ([^ ]+) \|.*/\1/')
+        # Extract source tag and address from the display string
+        # Format: "icon [TAG] address | ..."
+        local source_tag=$(echo "$line" | sed -E 's/^[✓✗?○] \[([A-Z]+)\].*/\1/')
+        local addr=$(echo "$line" | sed -E 's/^[✓✗?○] \[[A-Z]+\] ([^ ]+) \|.*/\1/')
+
         selected_addresses+=("$addr")
+        if [ "$source_tag" = "CFG" ]; then
+            selected_sources+=("config")
+            config_addresses+=("$addr")
+        else
+            selected_sources+=("dns")
+            dns_addresses+=("$addr")
+        fi
     done <<< "$selected"
 
     # Check if any peers were selected
@@ -191,10 +231,26 @@ interactive_peer_management() {
         return
     fi
 
-    # Show confirmation
+    # Show what was selected
     echo
-    print_warning "The following ${#selected_addresses[@]} peer(s) will be PERMANENTLY REMOVED:"
-    for addr in "${selected_addresses[@]}"; do
+    if [ ${#dns_addresses[@]} -gt 0 ]; then
+        print_warning "Note: ${#dns_addresses[@]} DNS-discovered peer(s) selected (cannot be removed from config):"
+        for addr in "${dns_addresses[@]}"; do
+            echo "  - $addr [DNS - skipped]"
+        done
+        echo
+    fi
+
+    if [ ${#config_addresses[@]} -eq 0 ]; then
+        print_error "No config peers selected - nothing to remove"
+        print_info "DNS peers exist only in cjdns runtime, not in your config file"
+        echo
+        read -p "Press Enter to continue..."
+        return
+    fi
+
+    print_warning "The following ${#config_addresses[@]} config peer(s) will be PERMANENTLY REMOVED:"
+    for addr in "${config_addresses[@]}"; do
         echo "  - $addr"
     done
 
@@ -219,9 +275,9 @@ interactive_peer_management() {
         fi
     fi
 
-    # Remove peers from config
+    # Remove only config peers from config
     echo
-    print_working "Removing peers from config..."
+    print_working "Removing config peers..."
 
     local temp_config="$WORK_DIR/config.tmp"
     cp "$CJDNS_CONFIG" "$temp_config"
@@ -230,7 +286,7 @@ interactive_peer_management() {
     local ipv4_removed=0
     local ipv6_removed=0
 
-    for addr in "${selected_addresses[@]}"; do
+    for addr in "${config_addresses[@]}"; do
         # Determine if IPv4 or IPv6
         if [[ "$addr" =~ ^\[ ]]; then
             # IPv6
@@ -252,7 +308,10 @@ interactive_peer_management() {
     if validate_config "$temp_config"; then
         cp "$temp_config" "$CJDNS_CONFIG"
         echo
-        print_success "Removed $ipv4_removed IPv4 and $ipv6_removed IPv6 peer(s)"
+        print_success "Removed $ipv4_removed IPv4 and $ipv6_removed IPv6 config peer(s)"
+        if [ ${#dns_addresses[@]} -gt 0 ]; then
+            print_info "(${#dns_addresses[@]} DNS peers skipped - they'll disappear after cjdns restart)"
+        fi
 
         echo
         if gum confirm "Restart cjdns service now?" </dev/tty >/dev/tty; then
