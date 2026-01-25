@@ -353,6 +353,90 @@ show_menu() {
     echo
 }
 
+# Check if config is normalized (only password+publicKey in connectTo)
+check_config_normalized() {
+    local config_file="$1"
+
+    # Check if any connectTo entry has fields beyond password and publicKey
+    local has_extra_fields=$(jq '
+        [.interfaces.UDPInterface[].connectTo // {} |
+         to_entries[] |
+         .value |
+         keys |
+         map(select(. != "password" and . != "publicKey"))] |
+        add |
+        length // 0
+    ' "$config_file")
+
+    if [ "$has_extra_fields" -gt 0 ]; then
+        return 1  # Not normalized
+    fi
+
+    return 0  # Normalized
+}
+
+# Normalize config to minimal format
+normalize_config() {
+    local config_file="$1"
+
+    print_info "Normalizing config..."
+    echo
+
+    # Backup first
+    local backup
+    if backup=$(backup_config "$config_file"); then
+        print_success "Backup created: $backup"
+    else
+        print_error "Failed to create backup - aborting normalization"
+        return 1
+    fi
+
+    local temp_config="$WORK_DIR/normalized_config.json"
+
+    # Normalize connectTo entries and authorizedPasswords
+    jq '
+        # Normalize UDPInterface connectTo entries
+        .interfaces.UDPInterface = [
+            .interfaces.UDPInterface[] |
+            if .connectTo then
+                .connectTo = (.connectTo | to_entries | map({
+                    key: .key,
+                    value: {
+                        password: .value.password,
+                        publicKey: .value.publicKey
+                    }
+                }) | from_entries)
+            else . end
+        ] |
+        # Normalize authorizedPasswords
+        if .authorizedPasswords then
+            .authorizedPasswords = [
+                .authorizedPasswords[] |
+                select(.password != null and (.user != null or .login != null)) |
+                {
+                    password: .password,
+                    user: (.user // .login)
+                }
+            ]
+        else . end
+    ' "$config_file" > "$temp_config"
+
+    # Validate normalized config
+    if validate_config "$temp_config"; then
+        cp "$temp_config" "$config_file"
+        print_success "Config normalized successfully!"
+        print_info "All connectTo entries now have only: password, publicKey"
+        print_info "All authorizedPasswords now have only: password, user"
+    else
+        print_error "Normalization failed validation - config NOT modified"
+        print_info "Original config is safe at: $config_file"
+        print_info "Backup is at: $backup"
+        return 1
+    fi
+
+    return 0
+}
+
 # Peer Adding Wizard - Main automated workflow
 peer_adding_wizard() {
     clear
@@ -390,8 +474,44 @@ peer_adding_wizard() {
                 ;;
             6|[Ii][Pp][Vv]6)
                 if [ "$ipv6_interface_exists" -eq 0 ]; then
-                    print_error "IPv6 interface (UDPInterface[1]) not found in config!"
-                    continue
+                    print_warning "IPv6 interface (UDPInterface[1]) not found in config"
+                    echo
+
+                    # Test IPv6 connectivity
+                    print_info "Testing IPv6 connectivity..."
+                    if ping6 -c 1 -W 2 google.com &>/dev/null 2>&1 || ping6 -c 1 -W 2 2001:4860:4860::8888 &>/dev/null 2>&1; then
+                        print_success "IPv6 connectivity detected on your system"
+                    else
+                        print_warning "IPv6 connectivity NOT detected on your system"
+                        print_info "You may not have IPv6 available, or it may be blocked"
+                    fi
+                    echo
+
+                    print_info "IPv6 interface is needed to add IPv6 peers"
+                    if ! ask_yes_no "Would you like to create an IPv6 interface now?"; then
+                        print_info "Cannot continue without IPv6 interface"
+                        continue
+                    fi
+
+                    # Create IPv6 interface
+                    echo
+                    print_info "Creating IPv6 interface in config..."
+                    print_info "You'll need your IPv6 bind address (e.g., [::]:PORT or [your-ipv6]:PORT)"
+                    echo
+                    local ipv6_bind=$(ask_input "Enter IPv6 bind address" "[::]:46010")
+
+                    # Add IPv6 interface to config
+                    local temp_config="$WORK_DIR/config_ipv6_add.json"
+                    jq --arg bind "$ipv6_bind" '.interfaces.UDPInterface[1] = {"bind": $bind, "connectTo": {}}' "$CJDNS_CONFIG" > "$temp_config"
+
+                    if validate_config "$temp_config"; then
+                        cp "$temp_config" "$CJDNS_CONFIG"
+                        print_success "IPv6 interface created successfully"
+                        ipv6_interface_exists=1
+                    else
+                        print_error "Failed to create IPv6 interface - config validation failed"
+                        continue
+                    fi
                 fi
                 protocol="ipv6"
                 print_success "IPv6 only selected"
@@ -399,10 +519,41 @@ peer_adding_wizard() {
                 ;;
             [Bb]|[Bb][Oo][Tt][Hh])
                 if [ "$ipv4_interface_exists" -eq 0 ] || [ "$ipv6_interface_exists" -eq 0 ]; then
-                    print_error "Both interfaces not available in config!"
-                    print_info "IPv4: $([ "$ipv4_interface_exists" -eq 1 ] && echo "Available" || echo "Missing")"
-                    print_info "IPv6: $([ "$ipv6_interface_exists" -eq 1 ] && echo "Available" || echo "Missing")"
-                    continue
+                    print_warning "Not all interfaces available in config"
+                    print_info "IPv4: $([ "$ipv4_interface_exists" -eq 1 ] && echo "✓ Available" || echo "✗ Missing")"
+                    print_info "IPv6: $([ "$ipv6_interface_exists" -eq 1 ] && echo "✓ Available" || echo "✗ Missing")"
+
+                    if [ "$ipv6_interface_exists" -eq 0 ]; then
+                        echo
+                        print_info "You can create the missing IPv6 interface, or select IPv4 only"
+                        if ask_yes_no "Create IPv6 interface now?"; then
+                            # Test IPv6 connectivity
+                            echo
+                            print_info "Testing IPv6 connectivity..."
+                            if ping6 -c 1 -W 2 google.com &>/dev/null 2>&1 || ping6 -c 1 -W 2 2001:4860:4860::8888 &>/dev/null 2>&1; then
+                                print_success "IPv6 connectivity detected"
+                            else
+                                print_warning "IPv6 connectivity NOT detected - interface may not work"
+                            fi
+
+                            echo
+                            local ipv6_bind=$(ask_input "Enter IPv6 bind address" "[::]:46010")
+
+                            local temp_config="$WORK_DIR/config_ipv6_add.json"
+                            jq --arg bind "$ipv6_bind" '.interfaces.UDPInterface[1] = {"bind": $bind, "connectTo": {}}' "$CJDNS_CONFIG" > "$temp_config"
+
+                            if validate_config "$temp_config"; then
+                                cp "$temp_config" "$CJDNS_CONFIG"
+                                print_success "IPv6 interface created"
+                                ipv6_interface_exists=1
+                            else
+                                print_error "Failed to create IPv6 interface"
+                                continue
+                            fi
+                        else
+                            continue
+                        fi
+                    fi
                 fi
                 protocol="both"
                 print_success "Both IPv4 and IPv6 selected"
@@ -436,6 +587,30 @@ peer_adding_wizard() {
     echo -e "  ${YELLOW}$master_ipv4${NC} IPv4 addresses found"
     echo -e "  ${ORANGE}$master_ipv6${NC} IPv6 addresses found"
     echo
+
+    # Check if config needs normalization before comparing with database
+    if ! check_config_normalized "$CJDNS_CONFIG"; then
+        echo
+        print_subheader "Config Normalization"
+        echo
+        print_warning "Your config contains extra metadata fields that cjdns doesn't use"
+        print_info "Normalizing will:"
+        echo "  • Keep only required fields (password, publicKey) in connectTo entries"
+        echo "  • Remove metadata like peerName, contact, location, login, gpg"
+        echo "  • Ensure accurate duplicate detection (prevents false positives)"
+        echo "  • Make config smaller and more reliable"
+        echo
+        print_info "This is safe and recommended - your working peers won't be affected"
+        echo
+
+        if ask_yes_no "Normalize config now?"; then
+            normalize_config "$CJDNS_CONFIG"
+        else
+            print_warning "Skipping normalization - you may see false 'credential updates'"
+            print_info "You can normalize later from 'Edit Config File' → 'Cleanup/Normalize Config'"
+        fi
+        echo
+    fi
 
     # Step 3: Filter for new peers
     print_subheader "Step 3: Finding New Peers"

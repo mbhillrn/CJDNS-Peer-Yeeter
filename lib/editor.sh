@@ -76,9 +76,10 @@ edit_authorized_passwords() {
         return 1
     fi
 
-    # Normalize authorizedPasswords to only password and user fields
-    # Remove extra fields like "login" that aren't needed
-    local normalized=$(jq '[.[] | {password: .password, user: (.user // .login // "user")}]' "$temp_section")
+    # Normalize authorizedPasswords to ONLY {password, user} format
+    # If entry has "login" but no "user", use login value as user (backwards compat)
+    # Entries without password or user/login are invalid and will be skipped
+    local normalized=$(jq '[.[] | select(.password != null and (.user != null or .login != null)) | {password: .password, user: (.user // .login)}]' "$temp_section")
 
     jq --argjson authpw "$normalized" '.authorizedPasswords = $authpw' "$config" > "$temp_config"
 
@@ -343,6 +344,8 @@ config_editor_menu() {
             echo "9) Interactive JSON Editor (fx) - RECOMMENDED"
         fi
 
+        echo
+        echo "C) Cleanup/Normalize Config (remove extra metadata)"
         echo "0) Back to Main Menu"
         echo
 
@@ -494,6 +497,48 @@ config_editor_menu() {
                         cp "$backup" "$CJDNS_CONFIG"
                         print_success "Config restored from backup"
                     fi
+                fi
+
+                echo
+                read -p "Press Enter to continue..."
+                ;;
+            [Cc])
+                clear
+                print_ascii_header
+                print_header "Cleanup/Normalize Config"
+                echo
+
+                print_info "This will normalize your config to minimal required fields:"
+                echo "  • connectTo entries: Only password and publicKey"
+                echo "  • authorizedPasswords: Only password and user"
+                echo
+                print_info "Benefits:"
+                echo "  • Smaller config file"
+                echo "  • More reliable validation"
+                echo "  • Prevents false 'credential update' detections"
+                echo "  • Matches actual cjdns requirements"
+                echo
+                print_warning "Fields that will be removed: peerName, contact, location, login, gpg"
+                print_info "These fields don't affect connectivity - only metadata"
+                echo
+
+                if ! ask_yes_no "Normalize config now?"; then
+                    print_info "Cancelled"
+                    echo
+                    read -p "Press Enter to continue..."
+                    continue
+                fi
+
+                echo
+
+                # Call the normalize_config function from peeryeeter.sh
+                if normalize_config "$CJDNS_CONFIG"; then
+                    echo
+                    if ask_yes_no "Restart cjdns service now to ensure changes work?"; then
+                        restart_service
+                    fi
+                else
+                    print_error "Normalization failed - see errors above"
                 fi
 
                 echo
