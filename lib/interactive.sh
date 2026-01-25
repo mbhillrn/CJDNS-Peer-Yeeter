@@ -102,7 +102,8 @@ interactive_peer_management() {
         echo
 
         # Handle ESC/cancellation gracefully - gum returns non-zero on ESC which can trigger set -e
-        if selected=$(gum choose --no-limit --height 20 "${peer_options[@]}" </dev/tty >/dev/tty 2>&1); then
+        # Note: stdin from /dev/tty for interactive input, but stdout must NOT be redirected so we can capture it
+        if selected=$(gum choose --no-limit --height 20 "${peer_options[@]}" </dev/tty 2>/dev/tty); then
             gum_exit=0
         else
             gum_exit=$?
@@ -122,7 +123,12 @@ interactive_peer_management() {
             print_warning "No peers selected!"
             print_info "Use SPACE to select peers first, then press ENTER"
             echo
-            read -p "Press Enter to try again (or press Ctrl+C to exit)..."
+            read -p "Press Enter to try again..."
+            clear
+            print_ascii_header
+            print_header "View Status & Remove Peers"
+            echo
+            print_success "Found ${#peer_addresses[@]} peers in config"
             echo
             continue
         fi
