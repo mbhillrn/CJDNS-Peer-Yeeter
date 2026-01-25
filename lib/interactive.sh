@@ -14,8 +14,8 @@ interactive_peer_management() {
     local peer_states="$WORK_DIR/peer_states.txt"
     get_current_peer_states "$ADMIN_IP" "$ADMIN_PORT" "$ADMIN_PASSWORD" "$peer_states"
 
-    # Update database with current states
-    while IFS='|' read -r state address; do
+    # Update database with current states (format is STATE|ADDRESS|SOURCE)
+    while IFS='|' read -r state address source; do
         update_peer_state "$address" "$state"
     done < "$peer_states"
 

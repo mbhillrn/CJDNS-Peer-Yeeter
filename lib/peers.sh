@@ -160,6 +160,7 @@ test_peer_connectivity() {
 }
 
 # Get current peer states from cjdns
+# Output format: STATE|ADDRESS|SOURCE where SOURCE is "config" or "dns"
 get_current_peer_states() {
     local admin_ip="$1"
     local admin_port="$2"
@@ -190,6 +191,8 @@ get_current_peer_states() {
 
             # Try to find matching config address (handles IPv6 leading zero differences)
             local matched_addr="$lladdr"
+            local in_config="dns"  # Default to DNS-discovered
+
             if [[ "$lladdr" =~ ^\[ ]]; then
                 # IPv6 - normalize and compare
                 local normalized_lladdr=$(normalize_ipv6_address "$lladdr")
@@ -198,12 +201,18 @@ get_current_peer_states() {
                     local normalized_config=$(normalize_ipv6_address "$config_addr")
                     if [ "$normalized_lladdr" = "$normalized_config" ]; then
                         matched_addr="$config_addr"
+                        in_config="config"
                         break
                     fi
                 done < "$config_addrs_file"
+            else
+                # IPv4 - direct comparison
+                if grep -Fxq "$lladdr" "$config_addrs_file" 2>/dev/null; then
+                    in_config="config"
+                fi
             fi
 
-            echo "$state|$matched_addr"
+            echo "$state|$matched_addr|$in_config"
         done < <(echo "$result" | jq -r '.peers[]? | "\(.state)|\(.lladdr)"' 2>/dev/null) >> "$output_file"
 
         # Check if we got any peers on this page
@@ -218,6 +227,20 @@ get_current_peer_states() {
     done
 
     return 0
+}
+
+# Filter peer states to only include peers from config (not DNS-discovered)
+filter_config_peers() {
+    local peer_states="$1"
+    local output_file="$2"
+
+    grep "|config$" "$peer_states" 2>/dev/null | sed 's/|config$//' > "$output_file" || touch "$output_file"
+}
+
+# Count unresponsive peers that are actually in config (not DNS-discovered)
+count_unresponsive_config_peers() {
+    local peer_states="$1"
+    grep "^UNRESPONSIVE|.*|config$" "$peer_states" 2>/dev/null | wc -l | tr -d ' '
 }
 
 # Filter out peers already in config
