@@ -89,28 +89,47 @@ interactive_peer_management() {
         return
     fi
 
-    # Use gum to select peers
+    # Use gum to select peers - loop until user selects something or cancels
     print_success "Found ${#peer_addresses[@]} peers in config"
-    echo
-    print_info "Use arrow keys to navigate, Space to select/deselect, Enter to confirm"
-    print_info "Press ESC to cancel"
     echo
 
     local selected=""
     local gum_exit=0
-    # Handle ESC/cancellation gracefully - gum returns non-zero on ESC which can trigger set -e
-    if selected=$(gum choose --no-limit --height 20 "${peer_options[@]}" </dev/tty >/dev/tty 2>&1); then
-        gum_exit=0
-    else
-        gum_exit=$?
-    fi
 
-    if [ $gum_exit -ne 0 ] || [ -z "$selected" ]; then
-        print_info "Cancelled or no peers selected"
+    while true; do
+        print_info "Use SPACE to select/deselect peers, then ENTER to confirm"
+        print_info "Press ESC to cancel and return to menu"
         echo
-        read -p "Press Enter to continue..."
-        return
-    fi
+
+        # Handle ESC/cancellation gracefully - gum returns non-zero on ESC which can trigger set -e
+        if selected=$(gum choose --no-limit --height 20 "${peer_options[@]}" </dev/tty >/dev/tty 2>&1); then
+            gum_exit=0
+        else
+            gum_exit=$?
+        fi
+
+        # ESC pressed - return to menu
+        if [ $gum_exit -ne 0 ]; then
+            print_info "Cancelled - returning to menu"
+            echo
+            read -p "Press Enter to continue..."
+            return
+        fi
+
+        # Check if anything was selected
+        if [ -z "$selected" ]; then
+            echo
+            print_warning "No peers selected!"
+            print_info "Use SPACE to select peers first, then press ENTER"
+            echo
+            read -p "Press Enter to try again (or press Ctrl+C to exit)..."
+            echo
+            continue
+        fi
+
+        # Something was selected, break out of loop
+        break
+    done
 
     # Parse selected peers
     declare -a selected_addresses
