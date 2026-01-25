@@ -112,20 +112,7 @@ interactive_peer_management() {
         print_info "Press ESC to cancel and return to menu"
         echo
 
-        # Offer to select all unresponsive if there are any
-        if [ ${#unresponsive_indices[@]} -gt 0 ]; then
-            if gum confirm "Select all ${#unresponsive_indices[@]} unresponsive peers?" </dev/tty 2>/dev/tty; then
-                # Build selection of all unresponsive peers
-                selected=""
-                for i in "${unresponsive_indices[@]}"; do
-                    [ -n "$selected" ] && selected="$selected"$'\n'
-                    selected="$selected${peer_options[$i]}"
-                done
-                break
-            fi
-            echo
-        fi
-
+        # Show the full peer list FIRST - let user browse and select
         # Handle ESC/cancellation gracefully - gum returns non-zero on ESC which can trigger set -e
         # Note: stdin from /dev/tty for interactive input, but stdout must NOT be redirected so we can capture it
         if selected=$(gum choose --no-limit --height "$gum_height" "${peer_options[@]}" </dev/tty 2>/dev/tty); then
@@ -145,7 +132,23 @@ interactive_peer_management() {
         # Check if anything was selected
         if [ -z "$selected" ]; then
             echo
-            print_warning "No peers selected!"
+            # If nothing selected but there are unresponsive peers, offer quick select
+            if [ ${#unresponsive_indices[@]} -gt 0 ]; then
+                print_warning "No peers selected."
+                echo
+                if gum confirm "Quick select: Remove all ${#unresponsive_indices[@]} unresponsive peers?" </dev/tty 2>/dev/tty; then
+                    # Build selection of all unresponsive peers
+                    selected=""
+                    for i in "${unresponsive_indices[@]}"; do
+                        [ -n "$selected" ] && selected="$selected"$'\n'
+                        selected="$selected${peer_options[$i]}"
+                    done
+                    break
+                fi
+            else
+                print_warning "No peers selected!"
+            fi
+            echo
             print_info "Use SPACE to select peers first, then press ENTER"
             echo
             read -p "Press Enter to try again..."
