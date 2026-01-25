@@ -41,9 +41,11 @@ interactive_peer_management() {
     # Build arrays for gum display
     declare -a peer_options
     declare -a peer_addresses
+    declare -a unresponsive_indices  # Track which indices are unresponsive
     local all_peers=$(get_all_peers_by_quality)
 
     # Add peers from database (with quality info)
+    local idx=0
     while IFS='|' read -r address state quality est_count unr_count first_seen last_change consecutive; do
         [ -z "$address" ] && continue
 
@@ -57,19 +59,23 @@ interactive_peer_management() {
         elif [ "$state" = "UNRESPONSIVE" ]; then
             status_icon="✗"
             peer_options+=("$status_icon $address | Q:$quality_display Est:$est_count Unr:$unr_count | Unresponsive $time_in_state (${consecutive}x)")
+            unresponsive_indices+=("$idx")
         else
             status_icon="?"
             peer_options+=("$status_icon $address | Q:$quality_display Est:$est_count Unr:$unr_count | $state $time_in_state")
         fi
 
         peer_addresses+=("$address")
+        idx=$((idx + 1))
     done <<< "$all_peers"
 
     # Add peers from config not yet in database
     for config_addr in "${all_config_peers[@]}"; do
         local already_added=false
+        local normalized_config=$(normalize_ipv6_address "$config_addr")
         for addr in "${peer_addresses[@]}"; do
-            if [ "$config_addr" = "$addr" ]; then
+            local normalized_addr=$(normalize_ipv6_address "$addr")
+            if [ "$normalized_config" = "$normalized_addr" ]; then
                 already_added=true
                 break
             fi
@@ -89,24 +95,72 @@ interactive_peer_management() {
         return
     fi
 
-    # Use gum to select peers
-    print_success "Found ${#peer_addresses[@]} peers in config"
-    echo
-    print_info "Use arrow keys to navigate, Space to select/deselect, Enter to confirm"
-    print_info "Press ESC to cancel"
+    # Calculate height - show all peers plus some padding (max 50 to avoid terminal issues)
+    local gum_height=${#peer_options[@]}
+    [ $gum_height -gt 50 ] && gum_height=50
+    [ $gum_height -lt 10 ] && gum_height=10
+
+    # Use gum to select peers - loop until user selects something or cancels
+    print_success "Found ${#peer_addresses[@]} peers in config (${#unresponsive_indices[@]} unresponsive)"
     echo
 
-    local selected
-    # Add explicit options and handle cancellation
-    selected=$(gum choose --no-limit --height 20 "${peer_options[@]}" </dev/tty >/dev/tty 2>&1)
-    local gum_exit=$?
+    local selected=""
+    local gum_exit=0
 
-    if [ $gum_exit -ne 0 ] || [ -z "$selected" ]; then
-        print_info "Cancelled or no peers selected"
+    while true; do
+        print_info "Use SPACE to select/deselect peers, then ENTER to confirm"
+        print_info "Press ESC to cancel and return to menu"
         echo
-        read -p "Press Enter to continue..."
-        return
-    fi
+
+        # Offer to select all unresponsive if there are any
+        if [ ${#unresponsive_indices[@]} -gt 0 ]; then
+            if gum confirm "Select all ${#unresponsive_indices[@]} unresponsive peers?" </dev/tty 2>/dev/tty; then
+                # Build selection of all unresponsive peers
+                selected=""
+                for i in "${unresponsive_indices[@]}"; do
+                    [ -n "$selected" ] && selected="$selected"$'\n'
+                    selected="$selected${peer_options[$i]}"
+                done
+                break
+            fi
+            echo
+        fi
+
+        # Handle ESC/cancellation gracefully - gum returns non-zero on ESC which can trigger set -e
+        # Note: stdin from /dev/tty for interactive input, but stdout must NOT be redirected so we can capture it
+        if selected=$(gum choose --no-limit --height "$gum_height" "${peer_options[@]}" </dev/tty 2>/dev/tty); then
+            gum_exit=0
+        else
+            gum_exit=$?
+        fi
+
+        # ESC pressed - return to menu
+        if [ $gum_exit -ne 0 ]; then
+            print_info "Cancelled - returning to menu"
+            echo
+            read -p "Press Enter to continue..."
+            return
+        fi
+
+        # Check if anything was selected
+        if [ -z "$selected" ]; then
+            echo
+            print_warning "No peers selected!"
+            print_info "Use SPACE to select peers first, then press ENTER"
+            echo
+            read -p "Press Enter to try again..."
+            clear
+            print_ascii_header
+            print_header "View Status & Remove Peers"
+            echo
+            print_success "Found ${#peer_addresses[@]} peers in config (${#unresponsive_indices[@]} unresponsive)"
+            echo
+            continue
+        fi
+
+        # Something was selected, break out of loop
+        break
+    done
 
     # Parse selected peers
     declare -a selected_addresses
@@ -260,9 +314,14 @@ interactive_file_deletion() {
     print_info "Press ESC to cancel"
     echo
 
-    local selected
-    selected=$(gum choose --no-limit --height 20 "${file_options[@]}" </dev/tty >/dev/tty 2>&1)
-    local gum_exit=$?
+    local selected=""
+    local gum_exit=0
+    # Handle ESC/cancellation gracefully
+    if selected=$(gum choose --no-limit --height 20 "${file_options[@]}" </dev/tty >/dev/tty 2>&1); then
+        gum_exit=0
+    else
+        gum_exit=$?
+    fi
 
     # Check if user cancelled (ESC key) or no selection
     if [ $gum_exit -ne 0 ] || [ -z "$selected" ]; then

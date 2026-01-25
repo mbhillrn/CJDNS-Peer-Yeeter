@@ -1223,21 +1223,34 @@ wizard_remove_unresponsive() {
     local temp_config="$WORK_DIR/config_remove.tmp"
     cp "$CJDNS_CONFIG" "$temp_config"
 
+    # Collect all addresses to remove (for database cleanup)
+    declare -a all_removed_addrs
+
     if [ "$count_ipv4" -gt 0 ]; then
         mapfile -t dead_addrs < "$unresponsive_ipv4"
+        all_removed_addrs+=("${dead_addrs[@]}")
         remove_peers_from_config "$temp_config" 0 "$temp_config.new" "${dead_addrs[@]}"
         mv "$temp_config.new" "$temp_config"
     fi
 
     if [ "$count_ipv6" -gt 0 ]; then
         mapfile -t dead_addrs < "$unresponsive_ipv6"
+        all_removed_addrs+=("${dead_addrs[@]}")
         remove_peers_from_config "$temp_config" 1 "$temp_config.new" "${dead_addrs[@]}"
         mv "$temp_config.new" "$temp_config"
     fi
 
     if validate_config "$temp_config"; then
         cp "$temp_config" "$CJDNS_CONFIG"
+
+        # Reset database tracking for removed peers (keep history but clear counts)
+        for addr in "${all_removed_addrs[@]}"; do
+            sqlite3 "$DB_FILE" "UPDATE peers SET established_count=0, unresponsive_count=0, consecutive_checks_in_state=0 WHERE address='$addr';" 2>/dev/null || true
+        done
+
         print_success "Removed $count_ipv4 IPv4 and $count_ipv6 IPv6 unresponsive peers"
+    else
+        print_error "Config validation failed - unresponsive peers NOT removed"
     fi
 }
 
@@ -2663,11 +2676,22 @@ restart_service() {
     echo "Restarting $CJDNS_SERVICE..."
 
     if systemctl restart "$CJDNS_SERVICE"; then
-        print_success "Service restarted"
+        print_success "Service restart command sent"
+
+        # Wait for service to fully start before showing journal
+        sleep 6
+
+        # Always show journal output after restart
+        echo
+        print_subheader "Service Journal (last 10 lines)"
+        echo "─────────────────────────────────────────────────────────────────"
+        journalctl -u "$CJDNS_SERVICE" -b --no-pager -n 10 2>/dev/null || echo "Unable to read journal"
+        echo "─────────────────────────────────────────────────────────────────"
 
         # Poll for connection with 2s intervals, max 10s
+        echo
         local attempts=0
-        local max_attempts=5
+        local max_attempts=3
 
         while [ $attempts -lt $max_attempts ]; do
             sleep 2
@@ -2681,8 +2705,15 @@ restart_service() {
         done
 
         print_warning "Service restarted but not responding yet"
+        print_info "Check the journal output above for any errors"
     else
         print_error "Failed to restart service"
+        echo
+        # Show journal on failure too
+        print_subheader "Service Journal (last 10 lines)"
+        echo "─────────────────────────────────────────────────────────────────"
+        journalctl -u "$CJDNS_SERVICE" -b --no-pager -n 10 2>/dev/null || echo "Unable to read journal"
+        echo "─────────────────────────────────────────────────────────────────"
     fi
 
     echo

@@ -4,6 +4,37 @@
 # Database location
 DB_FILE="$BACKUP_DIR/peer_tracking.db"
 
+# Normalize IPv6 address for comparison (removes leading zeros from hex groups)
+# Input: [2001:19f0:6c01:1f4f:5400:03ff:fe2f:dc95]:5078
+# Output: [2001:19f0:6c01:1f4f:5400:3ff:fe2f:dc95]:5078
+normalize_ipv6_address() {
+    local addr="$1"
+
+    # If not IPv6 (no brackets), return as-is
+    if [[ ! "$addr" =~ ^\[ ]]; then
+        echo "$addr"
+        return
+    fi
+
+    # Extract the IPv6 part and port
+    local ipv6_part="${addr%%]:*}"
+    ipv6_part="${ipv6_part#\[}"
+    local port="${addr##*]:}"
+
+    # Normalize each hex group by removing leading zeros
+    local normalized=""
+    local IFS=':'
+    for group in $ipv6_part; do
+        # Remove leading zeros but keep at least one digit
+        group=$(echo "$group" | sed 's/^0*//' )
+        [ -z "$group" ] && group="0"
+        [ -n "$normalized" ] && normalized="$normalized:"
+        normalized="$normalized$group"
+    done
+
+    echo "[$normalized]:$port"
+}
+
 # Check if database is locked
 check_database_lock() {
     local lock_file="${DB_FILE}-journal"
@@ -150,9 +181,9 @@ update_peer_state() {
     local state="$2"
     local now=$(date +%s)
 
-    # Check if peer exists in config
+    # Check if peer exists in config (in ANY interface)
     local in_config=0
-    if jq -e --arg addr "$address" '.interfaces.UDPInterface[].connectTo | has($addr)' "$CJDNS_CONFIG" &>/dev/null; then
+    if jq -e --arg addr "$address" '[.interfaces.UDPInterface[].connectTo // {} | has($addr)] | any' "$CJDNS_CONFIG" &>/dev/null; then
         in_config=1
     fi
 
@@ -336,8 +367,8 @@ clean_database() {
     while IFS= read -r address; do
         [ -z "$address" ] && continue
 
-        # Check if in config
-        if ! jq -e --arg addr "$address" '.interfaces.UDPInterface[].connectTo | has($addr)' "$CJDNS_CONFIG" &>/dev/null; then
+        # Check if in config (in ANY interface)
+        if ! jq -e --arg addr "$address" '[.interfaces.UDPInterface[].connectTo // {} | has($addr)] | any' "$CJDNS_CONFIG" &>/dev/null; then
             sqlite3 "$DB_FILE" "DELETE FROM peers WHERE address='$address';"
             count=$((count + 1))
         fi
