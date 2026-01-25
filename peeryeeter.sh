@@ -33,6 +33,7 @@ source "$SCRIPT_DIR/lib/guided_editor.sh"
 # Global variables (will be set during initialization)
 CJDNS_CONFIG=""
 CJDNS_SERVICE=""
+CJDROUTE_BIN=""
 ADMIN_IP=""
 ADMIN_PORT=""
 ADMIN_PASSWORD=""
@@ -216,6 +217,26 @@ initialize() {
     if [ -z "$CJDNS_SERVICE" ] && [ "$service_detected" -eq 0 ]; then
         echo
         print_warning "Service management disabled - you'll need to restart cjdns manually after config changes"
+    fi
+
+    # Detect cjdroute binary
+    print_subheader "Detecting cjdroute Binary"
+
+    if CJDROUTE_BIN=$(detect_cjdroute_binary "$CJDNS_SERVICE"); then
+        print_success "Found cjdroute: $CJDROUTE_BIN"
+    else
+        print_warning "cjdroute binary not found - config validation will be limited"
+        print_info "The program will still work, but cannot validate configs before applying them"
+        echo
+        if ask_yes_no "Continue without cjdroute validation?"; then
+            print_info "Continuing with limited validation (JSON structure only)"
+        else
+            print_error "Cannot proceed without cjdroute binary"
+            echo
+            echo "Please ensure cjdroute is installed and in your PATH, or install it from:"
+            echo "  https://github.com/cjdelisle/cjdns"
+            exit 1
+        fi
     fi
 
     # Validate config file

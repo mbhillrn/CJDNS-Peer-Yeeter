@@ -111,34 +111,42 @@ validate_config() {
         return 1
     fi
 
-    # Try to validate with cjdroute if available (check common locations)
-    local cjdroute_bin=""
-    for path in /usr/local/bin/cjdroute /usr/bin/cjdroute /opt/cjdns/cjdroute; do
-        if [ -x "$path" ]; then
-            cjdroute_bin="$path"
-            break
-        fi
-    done
-
-    if [ -n "$cjdroute_bin" ]; then
+    # Validate with cjdroute if available (using auto-detected binary)
+    if [ -n "${CJDROUTE_BIN:-}" ] && [ -x "$CJDROUTE_BIN" ]; then
         echo -n "  Running cjdroute --check validation... " >&2
-        local check_output=$("$cjdroute_bin" --check < "$config_file" 2>&1)
-        local check_result=$?
+
+        # Run validation and capture both stdout and stderr
+        local check_output
+        local check_result
+        check_output=$("$CJDROUTE_BIN" --check < "$config_file" 2>&1)
+        check_result=$?
 
         if [ $check_result -ne 0 ]; then
             echo -e "${RED}✗${NC}" >&2
-            print_error "cjdroute --check FAILED - config will NOT work!" >&2
             echo >&2
-            echo "Error output:" >&2
-            echo "$check_output" | head -20 >&2
+            print_error "═══════════════════════════════════════════════════════════════" >&2
+            print_error "  CRITICAL: cjdroute --check FAILED - config will NOT work!" >&2
+            print_error "═══════════════════════════════════════════════════════════════" >&2
             echo >&2
-            print_error "Your original config is safe and unchanged" >&2
+            print_info "Validation command: $CJDROUTE_BIN --check" >&2
+            print_info "Exit code: $check_result" >&2
+            echo >&2
+            print_error "Error output from cjdroute:" >&2
+            echo "───────────────────────────────────────────────────────────────" >&2
+            echo "$check_output" | head -30 >&2
+            echo "───────────────────────────────────────────────────────────────" >&2
+            echo >&2
+            print_info "Your original config is safe and unchanged" >&2
+            print_info "The changes were NOT applied to prevent breaking your cjdns installation" >&2
             return 1
+        else
+            echo -e "${GREEN}✓${NC}" >&2
+            print_info "  Config validated successfully with cjdroute" >&2
         fi
-        echo -e "${GREEN}✓${NC}" >&2
     else
-        print_warning "cjdroute binary not found in common locations" >&2
-        print_warning "Skipping native validation - config may fail at runtime!" >&2
+        print_warning "cjdroute binary not available - skipping native validation" >&2
+        print_warning "Config structure checks passed, but may fail at runtime!" >&2
+        print_info "To enable full validation, ensure cjdroute is in PATH or service file" >&2
     fi
 
     return 0
