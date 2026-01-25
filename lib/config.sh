@@ -152,7 +152,7 @@ validate_config() {
     return 0
 }
 
-# Add peers to config file (preserves all fields exactly as they appear)
+# Add peers to config file (writes ONLY required fields: password and publicKey)
 add_peers_to_config() {
     local config_file="$1"
     local peers_json="$2"
@@ -175,11 +175,22 @@ add_peers_to_config() {
         end
     ' "$config_file" > "$temp_config.tmp"
 
-    # Now merge peers into the interface
-    # This preserves ALL fields from the peers_json without modification
-    jq --slurpfile new_peers "$peers_json" --argjson idx "$interface_index" \
-        '.interfaces.UDPInterface[$idx].connectTo += $new_peers[0]' \
-        "$temp_config.tmp" > "$temp_config"
+    # Strip peers to only password and publicKey, then merge into the interface
+    # CJDNS only requires these two fields - extra metadata is unnecessary and can cause issues
+    jq --slurpfile new_peers "$peers_json" --argjson idx "$interface_index" '
+        .interfaces.UDPInterface[$idx].connectTo += (
+            $new_peers[0] |
+            to_entries |
+            map({
+                key: .key,
+                value: {
+                    password: .value.password,
+                    publicKey: .value.publicKey
+                }
+            }) |
+            from_entries
+        )
+    ' "$temp_config.tmp" > "$temp_config"
 
     rm -f "$temp_config.tmp"
 

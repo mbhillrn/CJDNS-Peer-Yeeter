@@ -76,7 +76,11 @@ edit_authorized_passwords() {
         return 1
     fi
 
-    jq --slurpfile authpw "$temp_section" '.authorizedPasswords = $authpw[0]' "$config" > "$temp_config"
+    # Normalize authorizedPasswords to only password and user fields
+    # Remove extra fields like "login" that aren't needed
+    local normalized=$(jq '[.[] | {password: .password, user: (.user // .login // "user")}]' "$temp_section")
+
+    jq --argjson authpw "$normalized" '.authorizedPasswords = $authpw' "$config" > "$temp_config"
 
     if validate_config "$temp_config"; then
         print_success "Authorized passwords updated"
@@ -110,12 +114,15 @@ edit_ipv4_peers() {
         return 1
     fi
 
+    # Normalize peers to only password and publicKey (strip metadata)
+    local normalized=$(jq 'to_entries | map({key: .key, value: {password: .value.password, publicKey: .value.publicKey}}) | from_entries' "$temp_section")
+
     # Merge back
-    jq --slurpfile peers "$temp_section" '
+    jq --argjson peers "$normalized" '
         if .interfaces.UDPInterface[0] then
-            .interfaces.UDPInterface[0].connectTo = $peers[0]
+            .interfaces.UDPInterface[0].connectTo = $peers
         else
-            .interfaces.UDPInterface[0] = {"connectTo": $peers[0]}
+            .interfaces.UDPInterface[0] = {"connectTo": $peers}
         end
     ' "$config" > "$temp_config"
 
@@ -161,21 +168,24 @@ edit_ipv6_peers() {
         return 1
     fi
 
+    # Normalize peers to only password and publicKey (strip metadata)
+    local normalized=$(jq 'to_entries | map({key: .key, value: {password: .value.password, publicKey: .value.publicKey}}) | from_entries' "$temp_section")
+
     # Merge back
     if [ "$has_ipv6" = "null" ]; then
         # Create new IPv6 interface with IPv6 bind address prompt
         print_info "Creating new IPv6 interface"
         local ipv6_bind=$(ask_input "Enter IPv6 bind address (e.g., [::]:PORT or [2001:db8::1]:PORT)")
 
-        jq --slurpfile peers "$temp_section" --arg bind "$ipv6_bind" '
+        jq --argjson peers "$normalized" --arg bind "$ipv6_bind" '
             .interfaces.UDPInterface[1] = {
                 "bind": $bind,
-                "connectTo": $peers[0]
+                "connectTo": $peers
             }
         ' "$config" > "$temp_config"
     else
-        jq --slurpfile peers "$temp_section" '
-            .interfaces.UDPInterface[1].connectTo = $peers[0]
+        jq --argjson peers "$normalized" '
+            .interfaces.UDPInterface[1].connectTo = $peers
         ' "$config" > "$temp_config"
     fi
 

@@ -1197,42 +1197,20 @@ add_single_peer() {
     print_ascii_header
     print_header "Add Single Peer"
 
-    print_info "Enter peer details (all fields are optional except address, password, and publicKey)"
+    print_info "Enter peer connection details"
+    print_info "Only password and publicKey are required - cjdns doesn't use metadata fields"
     echo
 
     local address=$(ask_input "Peer address (IP:PORT or [IPv6]:PORT)")
     local password=$(ask_input "Password")
     local publicKey=$(ask_input "Public key")
 
-    echo
-    print_info "Optional fields (press Enter to skip):"
-    local peerName=$(ask_input "Peer name" "")
-    local login=$(ask_input "Login" "")
-    local contact=$(ask_input "Contact" "")
-    local location=$(ask_input "Location" "")
-    local gpg=$(ask_input "GPG" "")
-
-    # Build JSON
+    # Build minimal JSON - only password and publicKey
+    # Metadata fields (peerName, contact, location, etc.) are not written to config
     local peer_json=$(jq -n \
         --arg pw "$password" \
         --arg pk "$publicKey" \
         '{password: $pw, publicKey: $pk}')
-
-    if [ -n "$peerName" ]; then
-        peer_json=$(echo "$peer_json" | jq --arg pn "$peerName" '. + {peerName: $pn}')
-    fi
-    if [ -n "$login" ]; then
-        peer_json=$(echo "$peer_json" | jq --arg l "$login" '. + {login: $l}')
-    fi
-    if [ -n "$contact" ]; then
-        peer_json=$(echo "$peer_json" | jq --arg c "$contact" '. + {contact: $c}')
-    fi
-    if [ -n "$location" ]; then
-        peer_json=$(echo "$peer_json" | jq --arg loc "$location" '. + {location: $loc}')
-    fi
-    if [ -n "$gpg" ]; then
-        peer_json=$(echo "$peer_json" | jq --arg g "$gpg" '. + {gpg: $g}')
-    fi
 
     # Show review
     echo
