@@ -178,12 +178,7 @@ get_current_peer_states() {
         fi
 
         # Extract peer addresses and states
-        # Normalize lladdr: cjdns may return "v4:1.2.3.4:port" for IPv4 - strip the "v4:" prefix
-        echo "$result" | jq -r '.peers[]? | "\(.state)|\(.lladdr)"' 2>/dev/null | while IFS='|' read -r state lladdr; do
-            # Strip v4: prefix if present (cjdns uses this for IPv4 UDP addresses)
-            lladdr="${lladdr#v4:}"
-            echo "$state|$lladdr"
-        done >> "$output_file"
+        echo "$result" | jq -r '.peers[]? | "\(.state)|\(.lladdr)"' >> "$output_file" 2>/dev/null || true
 
         # Check if we got any peers on this page
         local peer_count
