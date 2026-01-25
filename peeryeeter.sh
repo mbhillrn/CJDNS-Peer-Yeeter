@@ -489,13 +489,39 @@ peer_adding_wizard() {
     echo -e "  ${ORANGE}$new_ipv6_count${NC} new IPv6 peers not in config"
     if [ "$update_ipv4_count" -gt 0 ] || [ "$update_ipv6_count" -gt 0 ]; then
         echo
-        print_info "Peers with updated credentials detected:"
-        echo -e "  ${CYAN}$update_ipv4_count${NC} IPv4 peers have newer info in database"
-        echo -e "  ${CYAN}$update_ipv6_count${NC} IPv6 peers have newer info in database"
-        echo -e "  ${DIM}(These are peers ALREADY in your config with updated contact/location info)${NC}"
+        print_warning "═══════════════════════════════════════════════════════════════"
+        print_warning "  Peers with updated credentials detected!"
+        print_warning "═══════════════════════════════════════════════════════════════"
         echo
-        if ask_yes_no "Preview credential updates before continuing?"; then
+        print_info "These peers are ALREADY in your config, but have newer metadata in the database:"
+        echo
+
+        # List IPv4 peers with updates
+        if [ "$update_ipv4_count" -gt 0 ]; then
+            echo -e "${YELLOW}IPv4 peers with updates ($update_ipv4_count):${NC}"
+            jq -r 'keys[]' "$updates_ipv4" 2>/dev/null | while IFS= read -r addr; do
+                echo -e "  ${YELLOW}•${NC} $addr"
+            done
+            echo
+        fi
+
+        # List IPv6 peers with updates
+        if [ "$update_ipv6_count" -gt 0 ]; then
+            echo -e "${ORANGE}IPv6 peers with updates ($update_ipv6_count):${NC}"
+            jq -r 'keys[]' "$updates_ipv6" 2>/dev/null | while IFS= read -r addr; do
+                echo -e "  ${ORANGE}•${NC} $addr"
+            done
+            echo
+        fi
+
+        echo -e "${DIM}These updates may include changes to: peerName, contact, location, gpg, etc.${NC}"
+        echo -e "${DIM}(The password and publicKey remain the same - only metadata is updated)${NC}"
+        echo
+
+        # Always offer to show detailed preview
+        if ask_yes_no "View detailed credential differences?"; then
             wizard_preview_updates "$updates_ipv4" "$updates_ipv6" "$CJDNS_CONFIG"
+            echo
         fi
     fi
     echo
@@ -883,48 +909,76 @@ wizard_preview_updates() {
     # Show IPv4 updates
     local ipv4_addrs=$(jq -r 'keys[]' "$updates_ipv4" 2>/dev/null)
     if [ -n "$ipv4_addrs" ]; then
-        echo -e "${YELLOW}IPv4 Updates:${NC}"
+        echo -e "${YELLOW}═══ IPv4 Updates ═══${NC}"
         echo
+        local count=1
         while IFS= read -r addr; do
             [ -z "$addr" ] && continue
 
-            echo -e "${BOLD}Address: $addr${NC}"
+            echo -e "${BOLD}[$count] $addr${NC}"
+            echo
 
             local current=$(jq --arg addr "$addr" '.interfaces.UDPInterface[0].connectTo[$addr]' "$config_file")
             local new=$(jq --arg addr "$addr" '.[$addr]' "$updates_ipv4")
 
-            echo "Current config:"
-            echo "$current" | jq -r 'to_entries[] | "  \(.key): \(.value)"'
+            # Show all fields from both, highlighting differences
+            local all_keys=$(echo "$current $new" | jq -s 'map(keys) | add | unique | .[]' -r)
+
+            while IFS= read -r key; do
+                [ -z "$key" ] && continue
+
+                local current_val=$(echo "$current" | jq -r --arg k "$key" '.[$k] // "N/A"')
+                local new_val=$(echo "$new" | jq -r --arg k "$key" '.[$k] // "N/A"')
+
+                if [ "$current_val" != "$new_val" ]; then
+                    echo -e "  ${RED}$key:${NC}"
+                    echo -e "    ${DIM}Current:${NC} $current_val"
+                    echo -e "    ${GREEN}New:${NC}     $new_val"
+                else
+                    echo -e "  ${DIM}$key: $current_val${NC}"
+                fi
+            done <<< "$all_keys"
+
             echo
-            echo "New database info:"
-            echo "$new" | jq -r 'to_entries[] | "  \(.key): \(.value)"'
-            echo
-            echo "---"
-            echo
+            count=$((count + 1))
         done <<< "$ipv4_addrs"
     fi
 
     # Show IPv6 updates
     local ipv6_addrs=$(jq -r 'keys[]' "$updates_ipv6" 2>/dev/null)
     if [ -n "$ipv6_addrs" ]; then
-        echo -e "${ORANGE}IPv6 Updates:${NC}"
+        echo -e "${ORANGE}═══ IPv6 Updates ═══${NC}"
         echo
+        local count=1
         while IFS= read -r addr; do
             [ -z "$addr" ] && continue
 
-            echo -e "${BOLD}Address: $addr${NC}"
+            echo -e "${BOLD}[$count] $addr${NC}"
+            echo
 
             local current=$(jq --arg addr "$addr" '.interfaces.UDPInterface[1].connectTo[$addr]' "$config_file")
             local new=$(jq --arg addr "$addr" '.[$addr]' "$updates_ipv6")
 
-            echo "Current config:"
-            echo "$current" | jq -r 'to_entries[] | "  \(.key): \(.value)"'
+            # Show all fields from both, highlighting differences
+            local all_keys=$(echo "$current $new" | jq -s 'map(keys) | add | unique | .[]' -r)
+
+            while IFS= read -r key; do
+                [ -z "$key" ] && continue
+
+                local current_val=$(echo "$current" | jq -r --arg k "$key" '.[$k] // "N/A"')
+                local new_val=$(echo "$new" | jq -r --arg k "$key" '.[$k] // "N/A"')
+
+                if [ "$current_val" != "$new_val" ]; then
+                    echo -e "  ${RED}$key:${NC}"
+                    echo -e "    ${DIM}Current:${NC} $current_val"
+                    echo -e "    ${GREEN}New:${NC}     $new_val"
+                else
+                    echo -e "  ${DIM}$key: $current_val${NC}"
+                fi
+            done <<< "$all_keys"
+
             echo
-            echo "New database info:"
-            echo "$new" | jq -r 'to_entries[] | "  \(.key): \(.value)"'
-            echo
-            echo "---"
-            echo
+            count=$((count + 1))
         done <<< "$ipv6_addrs"
     fi
 
