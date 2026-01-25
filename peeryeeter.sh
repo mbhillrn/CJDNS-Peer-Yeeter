@@ -143,7 +143,13 @@ initialize() {
         echo "If your service has a different name or you don't have a systemd service,"
         echo "you can enter it here or leave blank to continue without service management."
         echo
-        CJDNS_SERVICE=$(ask_input "Service name (or press Enter to skip)" "")
+        CJDNS_SERVICE=$(ask_input "Service name (or press Enter to skip)" "" "true")
+
+        # Handle skipped service
+        if [ -z "$CJDNS_SERVICE" ]; then
+            print_info "Skipped - continuing without service management"
+            print_warning "Service restart functions will not be available"
+        fi
 
         # Validate service if provided
         if [ -n "$CJDNS_SERVICE" ]; then
