@@ -778,8 +778,8 @@ prompt_restart_with_journal() {
         if systemctl restart "$CJDNS_SERVICE"; then
             print_success "Service restart command sent"
 
-            # Wait for service to start
-            sleep 3
+            # Wait for service to fully start before showing journal
+            sleep 6
 
             # Show journal output regardless of status
             echo

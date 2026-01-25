@@ -1243,9 +1243,9 @@ wizard_remove_unresponsive() {
     if validate_config "$temp_config"; then
         cp "$temp_config" "$CJDNS_CONFIG"
 
-        # Also remove from database so they don't show up in status view
+        # Reset database tracking for removed peers (keep history but clear counts)
         for addr in "${all_removed_addrs[@]}"; do
-            sqlite3 "$DB_FILE" "DELETE FROM peers WHERE address='$addr';" 2>/dev/null || true
+            sqlite3 "$DB_FILE" "UPDATE peers SET established_count=0, unresponsive_count=0, consecutive_checks_in_state=0 WHERE address='$addr';" 2>/dev/null || true
         done
 
         print_success "Removed $count_ipv4 IPv4 and $count_ipv6 IPv6 unresponsive peers"
@@ -2678,8 +2678,8 @@ restart_service() {
     if systemctl restart "$CJDNS_SERVICE"; then
         print_success "Service restart command sent"
 
-        # Wait a moment for service to start
-        sleep 3
+        # Wait for service to fully start before showing journal
+        sleep 6
 
         # Always show journal output after restart
         echo
