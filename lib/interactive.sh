@@ -14,11 +14,13 @@ interactive_peer_management() {
     local peer_states="$WORK_DIR/peer_states.txt"
     get_current_peer_states "$ADMIN_IP" "$ADMIN_PORT" "$ADMIN_PASSWORD" "$peer_states"
 
-    # Build lookup of address -> source (config/dns) from peer_states
+    # Build lookup of address -> source and address -> state from peer_states
     declare -A peer_source_map
+    declare -A peer_state_map
     while IFS='|' read -r state address source; do
         [ -z "$address" ] && continue
         peer_source_map["$address"]="$source"
+        peer_state_map["$address"]="$state"
         update_peer_state "$address" "$state"
     done < "$peer_states"
 
@@ -107,6 +109,43 @@ interactive_peer_management() {
             peer_addresses+=("$config_addr")
             peer_sources+=("config")
             config_count=$((config_count + 1))
+        fi
+    done
+
+    # Add DNS-discovered peers from cjdns runtime (not in database or config)
+    for dns_addr in "${!peer_source_map[@]}"; do
+        # Only process DNS peers
+        [ "${peer_source_map[$dns_addr]}" != "dns" ] && continue
+
+        # Check if already added
+        local already_added=false
+        local normalized_dns=$(normalize_ipv6_address "$dns_addr")
+        for addr in "${peer_addresses[@]}"; do
+            local normalized_addr=$(normalize_ipv6_address "$addr")
+            if [ "$normalized_dns" = "$normalized_addr" ]; then
+                already_added=true
+                break
+            fi
+        done
+
+        if [ "$already_added" = false ]; then
+            local dns_state="${peer_state_map[$dns_addr]:-UNKNOWN}"
+            local status_icon="?"
+            local state_display="$dns_state"
+
+            if [ "$dns_state" = "ESTABLISHED" ]; then
+                status_icon="✓"
+                state_display="Established (DNS)"
+            elif [ "$dns_state" = "UNRESPONSIVE" ]; then
+                status_icon="✗"
+                state_display="Unresponsive (DNS)"
+            fi
+
+            peer_options+=("$status_icon [DNS] $dns_addr | Runtime peer | $state_display")
+            peer_addresses+=("$dns_addr")
+            peer_sources+=("dns")
+            dns_count=$((dns_count + 1))
+            idx=$((idx + 1))
         fi
     done
 
