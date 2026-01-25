@@ -38,8 +38,8 @@ sudo apt update && sudo apt install gum
 ## Installation
 
 ```bash
-git clone https://github.com/mbhillrn/CJDNS-Peer-Yeeter.git
-cd CJDNS-Peer-Yeeter
+git clone https://github.com/mbhillrn/CJDNS-Peer-Yeeter.git ~/c-peeryeeter
+cd ~/c-peeryeeter
 sudo ./peeryeeter.sh
 ```
 
@@ -185,9 +185,9 @@ MIT License - see [LICENSE](LICENSE)
 
 ---
 
-## Donations
+## Support
 
-If this tool saved you time, consider donating:
+If you find this tool useful, support is appreciated:
 
-**Bitcoin:** `YOUR_BTC_ADDRESS_HERE`
+**Bitcoin:** `bc1qy63057zemrskq0n02avq9egce4cpuuenm5ztf5`
 
