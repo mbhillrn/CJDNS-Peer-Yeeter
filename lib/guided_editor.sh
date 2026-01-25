@@ -1272,9 +1272,9 @@ edit_admin_settings() {
     echo
 
     echo
-    echo "${YELLOW}${BOLD}⚠  WARNING ⚠${RESET}"
-    echo "${YELLOW}If you change these settings, the Peer Yeeter will need to be${RESET}"
-    echo "${YELLOW}RESTARTED after cjdns restarts to reconnect with new credentials.${RESET}"
+    echo "${YELLOW}${BOLD}⚠  WARNING ⚠${NC}"
+    echo "${YELLOW}If you change these settings, the Peer Yeeter will need to be${NC}"
+    echo "${YELLOW}RESTARTED after cjdns restarts to reconnect with new credentials.${NC}"
     echo
 
     echo "Options:"
@@ -1328,10 +1328,10 @@ edit_admin_settings() {
     echo
 
     echo
-    echo "${RED}${BOLD}⚠  IMPORTANT ⚠${RESET}"
-    echo "${YELLOW}After applying these changes and restarting cjdns:${RESET}"
-    echo "${YELLOW}  1. You MUST restart the Peer Yeeter${RESET}"
-    echo "${YELLOW}  2. cjdnstool commands will need the new credentials${RESET}"
+    echo "${RED}${BOLD}⚠  IMPORTANT ⚠${NC}"
+    echo "${YELLOW}After applying these changes and restarting cjdns:${NC}"
+    echo "${YELLOW}  1. You MUST restart the Peer Yeeter${NC}"
+    echo "${YELLOW}  2. cjdnstool commands will need the new credentials${NC}"
     echo
 
     if ! gum confirm "Apply these changes?" 2>/dev/tty </dev/tty; then
@@ -1398,27 +1398,27 @@ regenerate_identity() {
     echo "└─────────────────────────────────────────────────────────────────────────────┘"
     echo
     echo
-    echo "${RED}${BOLD}╔══════════════════════════════════════════════════════════════════════════════╗${RESET}"
-    echo "${RED}${BOLD}║                           ⚠⚠⚠  DANGER ZONE  ⚠⚠⚠                              ║${RESET}"
-    echo "${RED}${BOLD}╠══════════════════════════════════════════════════════════════════════════════╣${RESET}"
-    echo "${RED}${BOLD}║  This operation will PERMANENTLY change your node's identity!               ║${RESET}"
-    echo "${RED}${BOLD}║                                                                              ║${RESET}"
-    echo "${RED}${BOLD}║  CONSEQUENCES:                                                               ║${RESET}"
-    echo "${RED}${BOLD}║                                                                              ║${RESET}"
-    echo "${RED}${BOLD}║  • Your FC address will CHANGE (currently: ${current_ipv6})    ║${RESET}"
-    echo "${RED}${BOLD}║                                                                              ║${RESET}"
-    echo "${RED}${BOLD}║  • ALL peers who connect TO you will need your NEW credentials              ║${RESET}"
-    echo "${RED}${BOLD}║    (new publicKey)                                                           ║${RESET}"
-    echo "${RED}${BOLD}║                                                                              ║${RESET}"
-    echo "${RED}${BOLD}║  • If you advertise your FC address ANYWHERE, it must be updated:           ║${RESET}"
-    echo "${RED}${BOLD}║    - Bitcoin Core config (bitcoin.conf) - needs update AND restart          ║${RESET}"
-    echo "${RED}${BOLD}║    - Any DNS records pointing to your FC address                            ║${RESET}"
-    echo "${RED}${BOLD}║    - Any services bound to your current FC address                          ║${RESET}"
-    echo "${RED}${BOLD}║    - Any firewall rules referencing your FC address                         ║${RESET}"
-    echo "${RED}${BOLD}║    - Any documentation or shared credentials                                ║${RESET}"
-    echo "${RED}${BOLD}║                                                                              ║${RESET}"
-    echo "${RED}${BOLD}║  THIS IS NOT FOR THE FAINT OF HEART!                                        ║${RESET}"
-    echo "${RED}${BOLD}╚══════════════════════════════════════════════════════════════════════════════╝${RESET}"
+    echo "${RED}${BOLD}╔══════════════════════════════════════════════════════════════════════════════╗${NC}"
+    echo "${RED}${BOLD}║                           ⚠⚠⚠  DANGER ZONE  ⚠⚠⚠                              ║${NC}"
+    echo "${RED}${BOLD}╠══════════════════════════════════════════════════════════════════════════════╣${NC}"
+    echo "${RED}${BOLD}║  This operation will PERMANENTLY change your node's identity!               ║${NC}"
+    echo "${RED}${BOLD}║                                                                              ║${NC}"
+    echo "${RED}${BOLD}║  CONSEQUENCES:                                                               ║${NC}"
+    echo "${RED}${BOLD}║                                                                              ║${NC}"
+    echo "${RED}${BOLD}║  • Your FC address will CHANGE (currently: ${current_ipv6})    ║${NC}"
+    echo "${RED}${BOLD}║                                                                              ║${NC}"
+    echo "${RED}${BOLD}║  • ALL peers who connect TO you will need your NEW credentials              ║${NC}"
+    echo "${RED}${BOLD}║    (new publicKey)                                                           ║${NC}"
+    echo "${RED}${BOLD}║                                                                              ║${NC}"
+    echo "${RED}${BOLD}║  • If you advertise your FC address ANYWHERE, it must be updated:           ║${NC}"
+    echo "${RED}${BOLD}║    - Bitcoin Core config (bitcoin.conf) - needs update AND restart          ║${NC}"
+    echo "${RED}${BOLD}║    - Any DNS records pointing to your FC address                            ║${NC}"
+    echo "${RED}${BOLD}║    - Any services bound to your current FC address                          ║${NC}"
+    echo "${RED}${BOLD}║    - Any firewall rules referencing your FC address                         ║${NC}"
+    echo "${RED}${BOLD}║    - Any documentation or shared credentials                                ║${NC}"
+    echo "${RED}${BOLD}║                                                                              ║${NC}"
+    echo "${RED}${BOLD}║  THIS IS NOT FOR THE FAINT OF HEART!                                        ║${NC}"
+    echo "${RED}${BOLD}╚══════════════════════════════════════════════════════════════════════════════╝${NC}"
     echo
     echo
 
@@ -1475,12 +1475,12 @@ regenerate_identity() {
     echo "└─────────────────────────────────────────────────────────────────────────────┘"
     echo
     echo
-    echo "${YELLOW}${BOLD}Identity Change Summary:${RESET}"
-    echo "${YELLOW}  Old IPv6: $current_ipv6${RESET}"
-    echo "${YELLOW}  New IPv6: $new_ipv6${RESET}"
+    echo "${YELLOW}${BOLD}Identity Change Summary:${NC}"
+    echo "${YELLOW}  Old IPv6: $current_ipv6${NC}"
+    echo "${YELLOW}  New IPv6: $new_ipv6${NC}"
     echo
-    echo "${RED}${BOLD}⚠  FINAL WARNING ⚠${RESET}"
-    echo "${RED}This change is IRREVERSIBLE without restoring from backup!${RESET}"
+    echo "${RED}${BOLD}⚠  FINAL WARNING ⚠${NC}"
+    echo "${RED}This change is IRREVERSIBLE without restoring from backup!${NC}"
     echo
 
     if ! gum confirm "Apply this new identity? (CANNOT BE UNDONE)" 2>/dev/tty </dev/tty; then
@@ -1521,23 +1521,23 @@ regenerate_identity() {
             echo
             print_success "Node identity updated!"
             echo
-            echo "${YELLOW}${BOLD}═══════════════════════════════════════════════════════════════════════════════${RESET}"
-            echo "${YELLOW}${BOLD}  NEXT STEPS - PLEASE READ CAREFULLY:${RESET}"
-            echo "${YELLOW}${BOLD}═══════════════════════════════════════════════════════════════════════════════${RESET}"
+            echo "${YELLOW}${BOLD}═══════════════════════════════════════════════════════════════════════════════${NC}"
+            echo "${YELLOW}${BOLD}  NEXT STEPS - PLEASE READ CAREFULLY:${NC}"
+            echo "${YELLOW}${BOLD}═══════════════════════════════════════════════════════════════════════════════${NC}"
             echo
             echo "  1. Restart cjdns service"
             echo
             echo "  2. Update ALL peers who connect TO you with your new publicKey:"
-            echo "     ${GREEN}$new_pubkey${RESET}"
+            echo "     ${GREEN}$new_pubkey${NC}"
             echo
             echo "  3. Update Bitcoin Core (if using cjdns):"
             echo "     - Edit bitcoin.conf and update any FC addresses"
-            echo "     - Your new FC address: ${GREEN}$new_ipv6${RESET}"
+            echo "     - Your new FC address: ${GREEN}$new_ipv6${NC}"
             echo "     - Restart bitcoind"
             echo
             echo "  4. Update any other services using your old FC address"
             echo
-            echo "${YELLOW}${BOLD}═══════════════════════════════════════════════════════════════════════════════${RESET}"
+            echo "${YELLOW}${BOLD}═══════════════════════════════════════════════════════════════════════════════${NC}"
             prompt_restart_with_journal
         else
             print_error "Config validation failed - changes not applied"
@@ -1587,13 +1587,13 @@ edit_interface_binds() {
         print_bold "Current Interface Configuration:"
         echo
         echo "┌─────────────────────────────────────────────────────────────────────────────┐"
-        echo "│ ${BOLD}IPv4 Interface (UDPInterface[0])${RESET}                                           │"
+        echo "│ ${BOLD}IPv4 Interface (UDPInterface[0])${NC}                                           │"
         printf "│   %-15s %-57s │\n" "Bind:" "$ipv4_bind"
         printf "│   %-15s %-57s │\n" "Beacon:" "$ipv4_beacon (0=off, 1=listen, 2=broadcast)"
         printf "│   %-15s %-57s │\n" "Beacon Port:" "$ipv4_beacon_port"
         printf "│   %-15s %-57s │\n" "Peers:" "$ipv4_peers connected"
         echo "├─────────────────────────────────────────────────────────────────────────────┤"
-        echo "│ ${BOLD}IPv6 Interface (UDPInterface[1])${RESET}                                           │"
+        echo "│ ${BOLD}IPv6 Interface (UDPInterface[1])${NC}                                           │"
         printf "│   %-15s %-57s │\n" "Bind:" "$ipv6_bind"
         printf "│   %-15s %-57s │\n" "Beacon:" "${ipv6_beacon:-0} (0=off, 1=listen, 2=broadcast)"
         printf "│   %-15s %-57s │\n" "Beacon Port:" "${ipv6_beacon_port:-0}"
@@ -1799,18 +1799,18 @@ guided_config_editor() {
 
         echo "What would you like to do?"
         echo
-        echo "${BOLD}Peer Management:${RESET}"
+        echo "${BOLD}Peer Management:${NC}"
         echo "1) Add New Peer"
         echo "2) Edit Existing Peer"
         echo "3) View All Peers"
         echo "4) Configure Public Peering"
         echo
-        echo "${BOLD}Credentials & Security:${RESET}"
+        echo "${BOLD}Credentials & Security:${NC}"
         echo "5) Authorized Passwords (incoming connections)"
         echo "6) Admin Settings (cjdnstool connection)"
         echo "7) Regenerate Identity (DANGER)"
         echo
-        echo "${BOLD}Network Settings:${RESET}"
+        echo "${BOLD}Network Settings:${NC}"
         echo "8) Interface Bind Addresses"
         echo
         echo "0) Back to Main Menu"
