@@ -168,6 +168,13 @@ get_current_peer_states() {
 
     > "$output_file"
 
+    # Get all config addresses for matching (handles IPv6 format differences)
+    local config_addrs_file="$WORK_DIR/config_addrs.txt"
+    {
+        jq -r '.interfaces.UDPInterface[0].connectTo // {} | keys[]' "$CJDNS_CONFIG" 2>/dev/null
+        jq -r '.interfaces.UDPInterface[1].connectTo // {} | keys[]' "$CJDNS_CONFIG" 2>/dev/null
+    } > "$config_addrs_file"
+
     local page=0
     while true; do
         local result
@@ -177,8 +184,27 @@ get_current_peer_states() {
             break
         fi
 
-        # Extract peer addresses and states
-        echo "$result" | jq -r '.peers[]? | "\(.state)|\(.lladdr)"' >> "$output_file" 2>/dev/null || true
+        # Extract peer addresses and states, matching to config format
+        while IFS='|' read -r state lladdr; do
+            [ -z "$lladdr" ] && continue
+
+            # Try to find matching config address (handles IPv6 leading zero differences)
+            local matched_addr="$lladdr"
+            if [[ "$lladdr" =~ ^\[ ]]; then
+                # IPv6 - normalize and compare
+                local normalized_lladdr=$(normalize_ipv6_address "$lladdr")
+                while IFS= read -r config_addr; do
+                    [ -z "$config_addr" ] && continue
+                    local normalized_config=$(normalize_ipv6_address "$config_addr")
+                    if [ "$normalized_lladdr" = "$normalized_config" ]; then
+                        matched_addr="$config_addr"
+                        break
+                    fi
+                done < "$config_addrs_file"
+            fi
+
+            echo "$state|$matched_addr"
+        done < <(echo "$result" | jq -r '.peers[]? | "\(.state)|\(.lladdr)"' 2>/dev/null) >> "$output_file"
 
         # Check if we got any peers on this page
         local peer_count
