@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 # Interactive Module - Gum-based interactive menus
 
-# Interactive Peer Management (combines Remove + Status with gum)
+# Interactive Peer Management (combines Remove + Status with gum) - PERMANENT CONFIG
 interactive_peer_management() {
     clear
     print_ascii_header
-    print_header "View Status & Remove Peers"
+    print_header "View Status & Remove Peers (Permanent config)"
 
+    print_info "This removes peers from your CONFIG FILE permanently."
+    print_info "Requires cjdns restart to take effect."
+    echo
     print_bold "Loading peer data from config and cjdns..."
     echo
 
@@ -239,10 +242,10 @@ interactive_peer_management() {
     done
 
     # Parse selected peers - extract address and determine source
-    declare -a selected_addresses
-    declare -a selected_sources
-    declare -a config_addresses  # Only config peers can be removed
-    declare -a dns_addresses     # DNS peers - just for display
+    declare -a selected_addresses=()
+    declare -a selected_sources=()
+    declare -a config_addresses=()  # Only config peers can be removed
+    declare -a dns_addresses=()     # DNS peers - just for display
 
     while IFS= read -r line; do
         # Extract source tag and address from the display string
@@ -362,6 +365,309 @@ interactive_peer_management() {
 
     echo
     read -p "Press Enter to continue..."
+}
+
+# Interactive Peer Disconnect - RUNTIME ONLY (no config modification)
+interactive_peer_disconnect_runtime() {
+    clear
+    print_ascii_header
+    print_header "View Status & Disconnect Peers (Runtime)"
+
+    print_warning "This disconnects peers from the RUNNING cjdns instance only!"
+    print_info "Changes are TEMPORARY - peers will reconnect on cjdns restart."
+    print_info "DNS-discovered peers CANNOT be disconnected (they auto-reconnect)."
+    echo
+    print_bold "Loading peer data from cjdns..."
+    echo
+
+    # Verify cjdnstool connection
+    if ! test_cjdnstool_connection "$ADMIN_IP" "$ADMIN_PORT" "$ADMIN_PASSWORD"; then
+        print_error "Cannot connect to cjdns admin interface"
+        print_info "Make sure cjdns is running and admin credentials are correct"
+        echo
+        read -p "Press Enter to continue..."
+        return
+    fi
+
+    # Get current peer states with public keys
+    local peer_data="$WORK_DIR/peer_runtime_data.txt"
+    get_runtime_peer_data "$ADMIN_IP" "$ADMIN_PORT" "$ADMIN_PASSWORD" "$peer_data"
+
+    # Get all peers from config for comparison
+    declare -a all_config_peers
+    while IFS= read -r addr; do
+        [ -n "$addr" ] && all_config_peers+=("$addr")
+    done < <(jq -r '.interfaces.UDPInterface[0].connectTo // {} | keys[]' "$CJDNS_CONFIG" 2>/dev/null)
+    while IFS= read -r addr; do
+        [ -n "$addr" ] && all_config_peers+=("$addr")
+    done < <(jq -r '.interfaces.UDPInterface[1].connectTo // {} | keys[]' "$CJDNS_CONFIG" 2>/dev/null)
+
+    # Build arrays for gum display
+    declare -a peer_options=()
+    declare -a peer_pubkeys=()
+    declare -a peer_addresses=()
+    declare -a peer_sources=()
+    declare -a unresponsive_indices=()
+
+    local config_count=0
+    local dns_count=0
+    local idx=0
+
+    while IFS='|' read -r state address pubkey; do
+        [ -z "$address" ] && continue
+
+        # Determine source - check if in config
+        local source="dns"
+        local normalized_addr=$(normalize_ipv6_address "$address")
+        for cfg_addr in "${all_config_peers[@]}"; do
+            local normalized_cfg=$(normalize_ipv6_address "$cfg_addr")
+            if [ "$normalized_addr" = "$normalized_cfg" ]; then
+                source="config"
+                break
+            fi
+        done
+
+        local source_tag="[DNS]"
+        if [ "$source" = "config" ]; then
+            source_tag="[CFG]"
+            config_count=$((config_count + 1))
+        else
+            dns_count=$((dns_count + 1))
+        fi
+
+        local status_icon
+        if [ "$state" = "ESTABLISHED" ]; then
+            status_icon="✓"
+            peer_options+=("$status_icon $source_tag $address | Connected")
+        elif [ "$state" = "UNRESPONSIVE" ]; then
+            status_icon="✗"
+            peer_options+=("$status_icon $source_tag $address | Unresponsive")
+            [ "$source" = "config" ] && unresponsive_indices+=("$idx")
+        else
+            status_icon="?"
+            peer_options+=("$status_icon $source_tag $address | $state")
+        fi
+
+        peer_addresses+=("$address")
+        peer_pubkeys+=("$pubkey")
+        peer_sources+=("$source")
+        idx=$((idx + 1))
+    done < "$peer_data"
+
+    if [ ${#peer_options[@]} -eq 0 ]; then
+        print_warning "No peers currently connected"
+        echo
+        read -p "Press Enter to continue..."
+        return
+    fi
+
+    local gum_height=${#peer_options[@]}
+    [ $gum_height -gt 50 ] && gum_height=50
+    [ $gum_height -lt 10 ] && gum_height=10
+
+    print_success "Found ${#peer_addresses[@]} connected peers: $config_count [CFG], $dns_count [DNS]"
+    print_warning "[DNS] peers cannot be disconnected (they will auto-reconnect)"
+    if [ ${#unresponsive_indices[@]} -gt 0 ]; then
+        print_info "${#unresponsive_indices[@]} unresponsive config peers"
+    fi
+    echo
+
+    local selected=""
+    local gum_exit=0
+    local preselect_unresponsive=false
+
+    # If there are unresponsive config peers, offer to pre-select them
+    if [ ${#unresponsive_indices[@]} -gt 0 ]; then
+        print_info "Pre-select all ${#unresponsive_indices[@]} unresponsive config peers?"
+        if gum confirm "Pre-select unresponsive?" </dev/tty 2>/dev/tty; then
+            preselect_unresponsive=true
+        fi
+        echo
+    fi
+
+    while true; do
+        print_info "Use SPACE to select/deselect peers, then ENTER to confirm"
+        print_info "Press ESC to cancel and return to menu"
+        echo
+
+        if [ "$preselect_unresponsive" = true ]; then
+            local preselected=""
+            for i in "${unresponsive_indices[@]}"; do
+                [ -n "$preselected" ] && preselected="$preselected,"
+                preselected="$preselected${peer_options[$i]}"
+            done
+            if selected=$(gum choose --no-limit --height "$gum_height" --selected "$preselected" "${peer_options[@]}" </dev/tty 2>/dev/tty); then
+                gum_exit=0
+            else
+                gum_exit=$?
+            fi
+            preselect_unresponsive=false
+        else
+            if selected=$(gum choose --no-limit --height "$gum_height" "${peer_options[@]}" </dev/tty 2>/dev/tty); then
+                gum_exit=0
+            else
+                gum_exit=$?
+            fi
+        fi
+
+        if [ $gum_exit -ne 0 ]; then
+            print_info "Cancelled - returning to menu"
+            echo
+            read -p "Press Enter to continue..."
+            return
+        fi
+
+        if [ -z "$selected" ]; then
+            echo
+            print_warning "No peers selected!"
+            print_info "Use SPACE to select peers first, then press ENTER"
+            echo
+            read -p "Press Enter to try again..."
+            clear
+            print_ascii_header
+            print_header "View Status & Disconnect Peers (Runtime)"
+            echo
+            print_success "Found ${#peer_addresses[@]} connected peers"
+            echo
+            continue
+        fi
+
+        break
+    done
+
+    # Parse selected peers
+    declare -a selected_pubkeys=()
+    declare -a selected_addresses=()
+    declare -a dns_skipped=()
+
+    while IFS= read -r line; do
+        local source_tag=$(echo "$line" | sed -E 's/^[✓✗?] \[([A-Z]+)\].*/\1/')
+        local addr=$(echo "$line" | sed -E 's/^[✓✗?] \[[A-Z]+\] ([^ ]+) \|.*/\1/')
+
+        # Find the pubkey for this address
+        for i in "${!peer_addresses[@]}"; do
+            if [ "${peer_addresses[$i]}" = "$addr" ]; then
+                if [ "$source_tag" = "DNS" ]; then
+                    dns_skipped+=("$addr")
+                else
+                    selected_pubkeys+=("${peer_pubkeys[$i]}")
+                    selected_addresses+=("$addr")
+                fi
+                break
+            fi
+        done
+    done <<< "$selected"
+
+    # Show what was selected
+    echo
+    if [ ${#dns_skipped[@]} -gt 0 ]; then
+        print_warning "Note: ${#dns_skipped[@]} DNS peer(s) selected (cannot disconnect - they auto-reconnect):"
+        for addr in "${dns_skipped[@]}"; do
+            echo "  - $addr [DNS - skipped]"
+        done
+        echo
+    fi
+
+    if [ ${#selected_addresses[@]} -eq 0 ]; then
+        print_error "No config peers selected - nothing to disconnect"
+        print_info "DNS peers will automatically reconnect even if disconnected"
+        echo
+        read -p "Press Enter to continue..."
+        return
+    fi
+
+    print_warning "The following ${#selected_addresses[@]} peer(s) will be DISCONNECTED (runtime only):"
+    for addr in "${selected_addresses[@]}"; do
+        echo "  - $addr"
+    done
+
+    echo
+    if ! gum confirm "Disconnect these peers?" </dev/tty >/dev/tty; then
+        print_info "Cancelled"
+        echo
+        read -p "Press Enter to continue..."
+        return
+    fi
+
+    # Disconnect peers
+    echo
+    print_working "Disconnecting peers..."
+
+    local disconnected=0
+    local failed=0
+
+    for i in "${!selected_addresses[@]}"; do
+        local addr="${selected_addresses[$i]}"
+        local pubkey="${selected_pubkeys[$i]}"
+
+        echo -n "  $addr... "
+
+        if runtime_disconnect_peer "$pubkey"; then
+            echo -e "${GREEN}✓ Disconnected${NC}"
+            disconnected=$((disconnected + 1))
+        else
+            echo -e "${RED}✗ Failed${NC}"
+            failed=$((failed + 1))
+        fi
+    done
+
+    echo
+    echo "═══════════════════════════════════════════════════════════════"
+    print_success "Runtime disconnect complete!"
+    echo "═══════════════════════════════════════════════════════════════"
+    echo
+    echo "Summary:"
+    echo "  • Disconnected $disconnected peer(s)"
+    if [ "$failed" -gt 0 ]; then
+        echo "  • Failed to disconnect $failed peer(s)"
+    fi
+    if [ ${#dns_skipped[@]} -gt 0 ]; then
+        echo "  • Skipped ${#dns_skipped[@]} DNS peer(s)"
+    fi
+    echo
+    print_warning "Remember: These peers are still in your config!"
+    print_info "They will reconnect when cjdns restarts."
+    print_info "To remove them permanently, use 'View Status & Remove Peers (Permanent config)'"
+
+    echo
+    read -p "Press Enter to continue..."
+}
+
+# Helper: Get runtime peer data with public keys
+get_runtime_peer_data() {
+    local admin_ip="$1"
+    local admin_port="$2"
+    local admin_password="$3"
+    local output_file="$4"
+
+    > "$output_file"
+
+    local page=0
+    while true; do
+        local result
+        result=$(cjdnstool -a "$admin_ip" -p "$admin_port" -P "$admin_password" cexec InterfaceController_peerStats --page=$page 2>/dev/null)
+
+        if [ -z "$result" ]; then
+            break
+        fi
+
+        # Extract peer state, address, and public key
+        while IFS='|' read -r state lladdr pubkey; do
+            [ -z "$lladdr" ] && continue
+            echo "$state|$lladdr|$pubkey"
+        done < <(echo "$result" | jq -r '.peers[]? | "\(.state)|\(.lladdr)|\(.publicKey)"' 2>/dev/null) >> "$output_file"
+
+        local peer_count
+        peer_count=$(echo "$result" | jq '.peers | length' 2>/dev/null || echo 0)
+
+        if [ "$peer_count" -eq 0 ]; then
+            break
+        fi
+
+        page=$((page + 1))
+    done
+
+    return 0
 }
 
 # Interactive file deletion (backups, exports, databases)
