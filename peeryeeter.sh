@@ -932,13 +932,20 @@ wizard_add_peers() {
     local peer_states="$WORK_DIR/peer_states.txt"
     get_current_peer_states "$ADMIN_IP" "$ADMIN_PORT" "$ADMIN_PASSWORD" "$peer_states"
 
-    local unresponsive_count=$(grep -c "^UNRESPONSIVE|" "$peer_states" 2>/dev/null || echo 0)
+    # Count unresponsive peers that are actually in config (not DNS-discovered)
+    local unresponsive_config=$(count_unresponsive_config_peers "$peer_states")
+    local unresponsive_dns=$(grep "^UNRESPONSIVE|.*|dns$" "$peer_states" 2>/dev/null | wc -l | tr -d ' ')
 
-    if [ "$unresponsive_count" -gt 0 ]; then
-        print_warning "You have $unresponsive_count unresponsive peers in your config"
-        if ask_yes_no "Remove unresponsive peers before adding new ones?"; then
+    if [ "$unresponsive_config" -gt 0 ]; then
+        print_warning "You have $unresponsive_config unresponsive peers in your config"
+        if [ "$unresponsive_dns" -gt 0 ]; then
+            print_info "(Plus $unresponsive_dns DNS-discovered peers not in config)"
+        fi
+        if ask_yes_no "Remove unresponsive config peers before adding new ones?"; then
             wizard_remove_unresponsive "$peer_states"
         fi
+    elif [ "$unresponsive_dns" -gt 0 ]; then
+        print_info "$unresponsive_dns unresponsive DNS-discovered peers (not in config, cannot remove)"
     fi
 
     # Backup config
@@ -1220,8 +1227,9 @@ wizard_remove_unresponsive() {
     local unresponsive_ipv4="$WORK_DIR/unresponsive_ipv4.txt"
     local unresponsive_ipv6="$WORK_DIR/unresponsive_ipv6.txt"
 
-    grep "^UNRESPONSIVE|" "$peer_states" | cut -d'|' -f2 | grep -v '^\[' > "$unresponsive_ipv4" 2>/dev/null || touch "$unresponsive_ipv4"
-    grep "^UNRESPONSIVE|" "$peer_states" | cut -d'|' -f2 | grep '^\[' > "$unresponsive_ipv6" 2>/dev/null || touch "$unresponsive_ipv6"
+    # Only remove peers that are actually in config (not DNS-discovered)
+    grep "^UNRESPONSIVE|.*|config$" "$peer_states" | cut -d'|' -f2 | grep -v '^\[' > "$unresponsive_ipv4" 2>/dev/null || touch "$unresponsive_ipv4"
+    grep "^UNRESPONSIVE|.*|config$" "$peer_states" | cut -d'|' -f2 | grep '^\[' > "$unresponsive_ipv6" 2>/dev/null || touch "$unresponsive_ipv6"
 
     local count_ipv4=$(wc -l < "$unresponsive_ipv4")
     local count_ipv6=$(wc -l < "$unresponsive_ipv6")
@@ -1473,8 +1481,8 @@ remove_peers_menu() {
     local peer_states="$WORK_DIR/peer_states.txt"
     get_current_peer_states "$ADMIN_IP" "$ADMIN_PORT" "$ADMIN_PASSWORD" "$peer_states"
 
-    # Update database with current states
-    while IFS='|' read -r state address; do
+    # Update database with current states (format is STATE|ADDRESS|SOURCE)
+    while IFS='|' read -r state address source; do
         update_peer_state "$address" "$state"
     done < "$peer_states"
 
@@ -1682,26 +1690,41 @@ view_peer_status() {
     local peer_states="$WORK_DIR/peer_states.txt"
     get_current_peer_states "$ADMIN_IP" "$ADMIN_PORT" "$ADMIN_PASSWORD" "$peer_states"
 
-    # Update database
-    while IFS='|' read -r state address; do
+    # Update database (extract state and address, ignoring source field)
+    while IFS='|' read -r state address source; do
         update_peer_state "$address" "$state"
     done < "$peer_states"
 
     local total=$(wc -l < "$peer_states" 2>/dev/null || echo 0)
     local established=$(grep -c "^ESTABLISHED|" "$peer_states" 2>/dev/null || echo 0)
     local unresponsive=$(grep -c "^UNRESPONSIVE|" "$peer_states" 2>/dev/null || echo 0)
+
+    # Count config vs DNS-discovered peers
+    local config_peers=$(grep -c "|config$" "$peer_states" 2>/dev/null || echo 0)
+    local dns_peers=$(grep -c "|dns$" "$peer_states" 2>/dev/null || echo 0)
+    local unresponsive_config=$(count_unresponsive_config_peers "$peer_states")
+    local unresponsive_dns=$((unresponsive - unresponsive_config))
+
     # Ensure numeric values
     total=${total//[^0-9]/}
     established=${established//[^0-9]/}
     unresponsive=${unresponsive//[^0-9]/}
+    config_peers=${config_peers//[^0-9]/}
+    dns_peers=${dns_peers//[^0-9]/}
     [ -z "$total" ] && total=0
     [ -z "$established" ] && established=0
     [ -z "$unresponsive" ] && unresponsive=0
+    [ -z "$config_peers" ] && config_peers=0
+    [ -z "$dns_peers" ] && dns_peers=0
     local other=$((total - established - unresponsive))
 
-    echo "Total peers: $total"
+    echo "Total peers: $total ($config_peers from config, $dns_peers DNS-discovered)"
     print_success "ESTABLISHED: $established"
-    print_error "UNRESPONSIVE: $unresponsive"
+    if [ "$unresponsive_config" -gt 0 ] || [ "$unresponsive_dns" -gt 0 ]; then
+        print_error "UNRESPONSIVE: $unresponsive ($unresponsive_config in config, $unresponsive_dns DNS)"
+    else
+        print_error "UNRESPONSIVE: $unresponsive"
+    fi
     if [ "$other" -gt 0 ]; then
         print_warning "OTHER STATES: $other"
     fi
