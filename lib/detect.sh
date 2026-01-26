@@ -71,14 +71,133 @@ get_admin_info() {
 }
 
 # Check cjdnstool version and availability
+# Returns: "type|version|path" where type is "nodejs" or "compiled"
 check_cjdnstool() {
     if ! command -v cjdnstool &>/dev/null; then
         return 1
     fi
 
-    local version
-    version=$(cjdnstool --version 2>/dev/null | head -1 || echo "unknown")
-    echo "$version"
+    local cj_path cj_type cj_version
+
+    cj_path=$(command -v cjdnstool)
+
+    # Detect type: Node.js version has 'ping' subcommand, compiled Rust version doesn't
+    if cjdnstool ping >/dev/null 2>&1; then
+        cj_type="nodejs"
+        # Node.js version doesn't support --version, get from package.json
+        local real_path=$(readlink -f "$cj_path" 2>/dev/null || echo "$cj_path")
+        local pkg_dir=$(dirname "$real_path")
+        if [ -f "$pkg_dir/package.json" ]; then
+            cj_version=$(jq -r '.version // "unknown"' "$pkg_dir/package.json" 2>/dev/null || echo "unknown")
+        else
+            cj_version="unknown"
+        fi
+    else
+        cj_type="compiled"
+        # Compiled version supports --version
+        cj_version=$(cjdnstool --version 2>/dev/null | head -1 | sed 's/cjdnstool //' || echo "unknown")
+    fi
+
+    echo "$cj_type|$cj_version|$cj_path"
+    return 0
+}
+
+# Check if cjdnstool is the recommended Node.js version
+# Returns 0 if Node.js version, 1 if compiled/other
+is_recommended_cjdnstool() {
+    local info
+    if ! info=$(check_cjdnstool); then
+        return 1
+    fi
+
+    local cj_type=$(echo "$info" | cut -d'|' -f1)
+    [ "$cj_type" = "nodejs" ]
+}
+
+# Install the recommended Node.js cjdnstool
+install_nodejs_cjdnstool() {
+    # Check if npm is available
+    if ! command -v npm &>/dev/null; then
+        echo "npm is required to install cjdnstool but was not found."
+        echo "Please install Node.js and npm first."
+        return 1
+    fi
+
+    echo "Installing cjdnstool via npm (this may require sudo)..."
+    echo
+
+    if sudo npm install -g cjdnstool 2>&1; then
+        echo
+        echo "Installation complete!"
+
+        # Verify installation
+        if command -v cjdnstool &>/dev/null; then
+            # Clear bash's command cache
+            hash -r 2>/dev/null || true
+            return 0
+        else
+            echo "Warning: cjdnstool installed but not found in PATH"
+            return 1
+        fi
+    else
+        echo "Installation failed"
+        return 1
+    fi
+}
+
+# Get currently connected runtime peers as a fake config JSON (for duplicate checking)
+# Returns a JSON file path that mimics the config structure
+get_runtime_peers_as_config() {
+    local admin_ip="$1"
+    local admin_port="$2"
+    local admin_password="$3"
+    local output_file="$4"
+
+    # Initialize with empty structure
+    echo '{"interfaces":{"UDPInterface":[{"connectTo":{}},{"connectTo":{}}]}}' > "$output_file"
+
+    local page=0
+    local ipv4_peers="{}"
+    local ipv6_peers="{}"
+
+    while true; do
+        local result
+        result=$(cjdnstool -a "$admin_ip" -p "$admin_port" -P "$admin_password" cexec InterfaceController_peerStats --page=$page 2>/dev/null)
+
+        if [ -z "$result" ]; then
+            break
+        fi
+
+        # Extract peers and categorize by IP type
+        while IFS='|' read -r state lladdr pubkey; do
+            [ -z "$lladdr" ] && continue
+
+            # Create a minimal peer entry (we only need address for duplicate checking)
+            local peer_entry='{"publicKey":"'"$pubkey"'","password":""}'
+
+            if [[ "$lladdr" =~ ^\[ ]]; then
+                # IPv6 peer
+                ipv6_peers=$(echo "$ipv6_peers" | jq --arg addr "$lladdr" --argjson peer "$peer_entry" '. + {($addr): $peer}')
+            else
+                # IPv4 peer
+                ipv4_peers=$(echo "$ipv4_peers" | jq --arg addr "$lladdr" --argjson peer "$peer_entry" '. + {($addr): $peer}')
+            fi
+        done < <(echo "$result" | jq -r '.peers[]? | "\(.state)|\(.lladdr)|\(.publicKey)"' 2>/dev/null)
+
+        local peer_count
+        peer_count=$(echo "$result" | jq '.peers | length' 2>/dev/null || echo 0)
+
+        if [ "$peer_count" -eq 0 ]; then
+            break
+        fi
+
+        page=$((page + 1))
+    done
+
+    # Build the fake config structure
+    jq -n --argjson ipv4 "$ipv4_peers" --argjson ipv6 "$ipv6_peers" \
+        '{"interfaces":{"UDPInterface":[{"connectTo":$ipv4},{"connectTo":$ipv6}]}}' > "$output_file"
+
     return 0
 }
 
