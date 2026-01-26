@@ -349,12 +349,14 @@ show_menu() {
     echo "Config: $CJDNS_CONFIG"
     echo "Backup: $BACKUP_DIR"
     echo
-    echo "1) 🧙 Peer Adding Wizard (Recommended)"
-    echo "2) 🔍 Discover & Preview Peers"
-    echo "3) ✏️  Edit Config File"
-    echo "4) 🗑️  View Status & Remove Peers"
-    echo "5) 📊 View Peer Status"
-    echo "6) ⚙️  Maintenance & Settings"
+    echo "1) 🧙 Peer Adding Wizard (Permanent config)"
+    echo "2) ⚡ Peer Adding Wizard (Runtime)"
+    echo "3) 🔍 Discover & Preview Peers"
+    echo "4) ✏️  Edit Config File"
+    echo "5) 🗑️  View Status & Remove Peers (Permanent config)"
+    echo "6) 🔌 View Status & Disconnect Peers (Runtime)"
+    echo "7) 📊 View Peer Status"
+    echo "8) ⚙️  Maintenance & Settings"
     echo "0) Exit"
     echo
 }
@@ -443,13 +445,14 @@ normalize_config() {
     return 0
 }
 
-# Peer Adding Wizard - Main automated workflow
+# Peer Adding Wizard - Main automated workflow (Permanent config)
 peer_adding_wizard() {
     clear
     print_ascii_header
-    print_header "Peer Adding Wizard"
+    print_header "Peer Adding Wizard (Permanent config)"
 
-    print_info "This wizard will guide you through discovering, testing, and adding peers."
+    print_info "This wizard will guide you through discovering, testing, and adding peers to your CONFIG FILE."
+    print_info "Changes require a cjdns restart to take effect."
     echo
 
     # Verify config structure
@@ -1266,6 +1269,374 @@ wizard_remove_unresponsive() {
     else
         print_error "Config validation failed - unresponsive peers NOT removed"
     fi
+}
+
+# =============================================================================
+# RUNTIME PEER MANAGEMENT FUNCTIONS
+# =============================================================================
+
+# Add a single peer to cjdns runtime via cjdnstool
+# Usage: runtime_add_peer "address" "publicKey" "password" interface_number
+runtime_add_peer() {
+    local address="$1"
+    local publicKey="$2"
+    local password="$3"
+    local interface_num="$4"
+
+    local result
+    result=$(cjdnstool -a "$ADMIN_IP" -p "$ADMIN_PORT" -P "$ADMIN_PASSWORD" cexec \
+        UDPInterface_beginConnection \
+        --publicKey="$publicKey" \
+        --address="$address" \
+        --interfaceNumber="$interface_num" \
+        --password="$password" 2>&1)
+
+    local exit_code=$?
+
+    if [ $exit_code -eq 0 ] && echo "$result" | jq -e '.error == "none"' &>/dev/null; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Disconnect a peer from cjdns runtime via cjdnstool
+# Usage: runtime_disconnect_peer "publicKey"
+runtime_disconnect_peer() {
+    local publicKey="$1"
+
+    local result
+    result=$(cjdnstool -a "$ADMIN_IP" -p "$ADMIN_PORT" -P "$ADMIN_PASSWORD" cexec \
+        InterfaceController_disconnectPeer \
+        --pubkey="$publicKey" 2>&1)
+
+    local exit_code=$?
+
+    if [ $exit_code -eq 0 ] && echo "$result" | jq -e '.error == "none"' &>/dev/null; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Peer Adding Wizard - Runtime version (no config modification)
+peer_adding_wizard_runtime() {
+    clear
+    print_ascii_header
+    print_header "Peer Adding Wizard (Runtime)"
+
+    print_info "This wizard adds peers DIRECTLY to the running cjdns instance."
+    print_warning "Changes are TEMPORARY - they will be lost when cjdns restarts!"
+    print_info "Use this to test peers before adding them permanently."
+    echo
+
+    # Verify cjdnstool connection
+    if ! test_cjdnstool_connection "$ADMIN_IP" "$ADMIN_PORT" "$ADMIN_PASSWORD"; then
+        print_error "Cannot connect to cjdns admin interface"
+        print_info "Make sure cjdns is running and admin credentials are correct"
+        echo
+        read -p "Press Enter to continue..."
+        return
+    fi
+
+    # Verify config structure for interface detection
+    local ipv4_interface_exists=$(jq -e '.interfaces.UDPInterface[0]' "$CJDNS_CONFIG" &>/dev/null && echo 1 || echo 0)
+    local ipv6_interface_exists=$(jq -e '.interfaces.UDPInterface[1]' "$CJDNS_CONFIG" &>/dev/null && echo 1 || echo 0)
+
+    # Step 1: Ask protocol selection
+    print_subheader "Step 1: Protocol Selection"
+    echo "What protocol would you like to discover peers for?"
+    echo "  4) IPv4 only"
+    echo "  6) IPv6 only"
+    echo "  B) Both IPv4 and IPv6"
+    echo "  0) Cancel and return to main menu"
+    echo
+
+    local protocol
+    while true; do
+        read -p "Enter selection (4/6/B/0): " -r protocol < /dev/tty
+        case "$protocol" in
+            4|[Ii][Pp][Vv]4)
+                if [ "$ipv4_interface_exists" -eq 0 ]; then
+                    print_error "IPv4 interface (UDPInterface[0]) not found in config!"
+                    continue
+                fi
+                protocol="ipv4"
+                print_success "IPv4 only selected"
+                break
+                ;;
+            6|[Ii][Pp][Vv]6)
+                if [ "$ipv6_interface_exists" -eq 0 ]; then
+                    print_error "IPv6 interface (UDPInterface[1]) not found in config!"
+                    print_info "Create an IPv6 interface using the permanent config wizard first"
+                    continue
+                fi
+                protocol="ipv6"
+                print_success "IPv6 only selected"
+                break
+                ;;
+            [Bb]|[Bb][Oo][Tt][Hh])
+                if [ "$ipv4_interface_exists" -eq 0 ] || [ "$ipv6_interface_exists" -eq 0 ]; then
+                    print_warning "Not all interfaces available in config"
+                    print_info "IPv4: $([ "$ipv4_interface_exists" -eq 1 ] && echo "✓ Available" || echo "✗ Missing")"
+                    print_info "IPv6: $([ "$ipv6_interface_exists" -eq 1 ] && echo "✓ Available" || echo "✗ Missing")"
+                    continue
+                fi
+                protocol="both"
+                print_success "Both IPv4 and IPv6 selected"
+                break
+                ;;
+            0|[Cc]|[Cc][Aa][Nn][Cc][Ee][Ll])
+                print_info "Cancelled"
+                echo
+                read -p "Press Enter to continue..."
+                return
+                ;;
+            *)
+                print_error "Please enter 4, 6, B, or 0"
+                ;;
+        esac
+    done
+    echo
+
+    # Step 2: Update local address database
+    print_subheader "Step 2: Updating Local Address Database"
+    echo
+    print_bold "Fetching latest addresses from online sources..."
+    echo
+
+    local result=$(update_master_list)
+    local master_ipv4=$(echo "$result" | cut -d'|' -f1)
+    local master_ipv6=$(echo "$result" | cut -d'|' -f2)
+
+    echo
+    print_bold "✓ Local Address Database updated"
+    echo -e "  ${YELLOW}$master_ipv4${NC} IPv4 addresses found"
+    echo -e "  ${ORANGE}$master_ipv6${NC} IPv6 addresses found"
+    echo
+
+    # Step 3: Filter for new peers (not in config AND not currently connected)
+    print_subheader "Step 3: Finding New Peers"
+
+    local discovered_ipv4="$WORK_DIR/discovered_ipv4.json"
+    local discovered_ipv6="$WORK_DIR/discovered_ipv6.json"
+    local new_ipv4="$WORK_DIR/new_ipv4.json"
+    local new_ipv6="$WORK_DIR/new_ipv6.json"
+    local updates_ipv4="$WORK_DIR/updates_ipv4.json"
+    local updates_ipv6="$WORK_DIR/updates_ipv6.json"
+
+    # Get peers from local address database
+    if [ "$protocol" = "ipv4" ] || [ "$protocol" = "both" ]; then
+        get_master_peers "ipv4" > "$discovered_ipv4"
+    else
+        echo "{}" > "$discovered_ipv4"
+    fi
+
+    if [ "$protocol" = "ipv6" ] || [ "$protocol" = "both" ]; then
+        get_master_peers "ipv6" > "$discovered_ipv6"
+    else
+        echo "{}" > "$discovered_ipv6"
+    fi
+
+    # Smart duplicate detection
+    local new_counts_ipv4="0|0"
+    local new_counts_ipv6="0|0"
+
+    if [ "$protocol" = "ipv4" ] || [ "$protocol" = "both" ]; then
+        new_counts_ipv4=$(smart_duplicate_check "$discovered_ipv4" "$CJDNS_CONFIG" 0 "$new_ipv4" "$updates_ipv4" 0)
+    else
+        echo "{}" > "$new_ipv4"
+        echo "{}" > "$updates_ipv4"
+    fi
+
+    if [ "$protocol" = "ipv6" ] || [ "$protocol" = "both" ]; then
+        new_counts_ipv6=$(smart_duplicate_check "$discovered_ipv6" "$CJDNS_CONFIG" 1 "$new_ipv6" "$updates_ipv6" 0)
+    else
+        echo "{}" > "$new_ipv6"
+        echo "{}" > "$updates_ipv6"
+    fi
+
+    local new_ipv4_count=$(echo "$new_counts_ipv4" | cut -d'|' -f1)
+    local new_ipv6_count=$(echo "$new_counts_ipv6" | cut -d'|' -f1)
+
+    echo
+    echo "Summary:"
+    echo -e "  ${YELLOW}$new_ipv4_count${NC} new IPv4 peers not in config"
+    echo -e "  ${ORANGE}$new_ipv6_count${NC} new IPv6 peers not in config"
+    echo
+
+    if [ "$new_ipv4_count" -eq 0 ] && [ "$new_ipv6_count" -eq 0 ]; then
+        print_warning "No new peers to add"
+        echo
+        read -p "Press Enter to continue..."
+        return
+    fi
+
+    # Step 4: Test connectivity
+    print_subheader "Step 4: Testing Connectivity"
+
+    if ! ask_yes_no "Test connectivity to discovered peers? (May take several minutes)"; then
+        print_info "Skipping connectivity tests"
+        echo
+        read -p "Press Enter to continue..."
+        return
+    fi
+
+    local active_ipv4="$WORK_DIR/active_ipv4.json"
+    local active_ipv6="$WORK_DIR/active_ipv6.json"
+    local inactive_ipv4="$WORK_DIR/inactive_ipv4.json"
+    local inactive_ipv6="$WORK_DIR/inactive_ipv6.json"
+
+    wizard_test_peers "$new_ipv4" "$new_ipv6" "$active_ipv4" "$active_ipv6" "$inactive_ipv4" "$inactive_ipv6"
+
+    local active_ipv4_count=$(jq 'length' "$active_ipv4")
+    local active_ipv6_count=$(jq 'length' "$active_ipv6")
+
+    echo
+    echo "Local address database test results:"
+    print_success "  Active: $active_ipv4_count IPv4, $active_ipv6_count IPv6"
+    echo
+
+    # Step 5: Selection options
+    print_subheader "Step 5: Select Peers to Add (Runtime)"
+    echo
+    print_warning "Remember: These peers will be added to RUNTIME only!"
+    print_info "They will NOT be saved to config and will disappear on restart."
+    echo
+
+    if [ "$active_ipv4_count" -eq 0 ] && [ "$active_ipv6_count" -eq 0 ]; then
+        print_warning "No active peers found to add"
+        echo
+        read -p "Press Enter to continue..."
+        return
+    fi
+
+    echo "What would you like to add?"
+    echo "  A) All active peers (${active_ipv4_count} IPv4, ${active_ipv6_count} IPv6)"
+    echo "  4) IPv4 active only ($active_ipv4_count peers)"
+    echo "  6) IPv6 active only ($active_ipv6_count peers)"
+    echo "  C) Cancel"
+    echo
+
+    local selection
+    while true; do
+        read -p "Enter selection: " -r selection < /dev/tty
+        case "$selection" in
+            [Aa])
+                runtime_wizard_add_peers "$active_ipv4" "$active_ipv6" "$active_ipv4_count" "$active_ipv6_count"
+                break
+                ;;
+            4)
+                echo "{}" > "$WORK_DIR/empty.json"
+                runtime_wizard_add_peers "$active_ipv4" "$WORK_DIR/empty.json" "$active_ipv4_count" 0
+                break
+                ;;
+            6)
+                echo "{}" > "$WORK_DIR/empty.json"
+                runtime_wizard_add_peers "$WORK_DIR/empty.json" "$active_ipv6" 0 "$active_ipv6_count"
+                break
+                ;;
+            [Cc])
+                print_info "Cancelled"
+                break
+                ;;
+            *)
+                print_error "Invalid selection"
+                ;;
+        esac
+    done
+
+    echo
+    read -p "Press Enter to continue..."
+}
+
+# Runtime wizard helper: add peers to runtime
+runtime_wizard_add_peers() {
+    local peers_ipv4="$1"
+    local peers_ipv6="$2"
+    local count_ipv4="$3"
+    local count_ipv6="$4"
+
+    echo
+    print_subheader "Adding Peers to Runtime"
+    echo
+    print_info "Adding $count_ipv4 IPv4 peers and $count_ipv6 IPv6 peers to cjdns runtime..."
+    echo
+
+    local total_added=0
+    local total_failed=0
+
+    # Add IPv4 peers
+    if [ "$count_ipv4" -gt 0 ]; then
+        print_info "Adding IPv4 peers..."
+        local added=0
+        local failed=0
+
+        while IFS= read -r addr; do
+            [ -z "$addr" ] && continue
+
+            local peer_data=$(jq --arg addr "$addr" '.[$addr]' "$peers_ipv4")
+            local publicKey=$(echo "$peer_data" | jq -r '.publicKey')
+            local password=$(echo "$peer_data" | jq -r '.password')
+
+            echo -n "  $addr... "
+
+            if runtime_add_peer "$addr" "$publicKey" "$password" 0; then
+                echo -e "${GREEN}✓${NC}"
+                added=$((added + 1))
+            else
+                echo -e "${RED}✗${NC}"
+                failed=$((failed + 1))
+            fi
+        done < <(jq -r 'keys[]' "$peers_ipv4")
+
+        print_success "  IPv4: $added added, $failed failed"
+        total_added=$((total_added + added))
+        total_failed=$((total_failed + failed))
+    fi
+
+    # Add IPv6 peers
+    if [ "$count_ipv6" -gt 0 ]; then
+        print_info "Adding IPv6 peers..."
+        local added=0
+        local failed=0
+
+        while IFS= read -r addr; do
+            [ -z "$addr" ] && continue
+
+            local peer_data=$(jq --arg addr "$addr" '.[$addr]' "$peers_ipv6")
+            local publicKey=$(echo "$peer_data" | jq -r '.publicKey')
+            local password=$(echo "$peer_data" | jq -r '.password')
+
+            echo -n "  $addr... "
+
+            if runtime_add_peer "$addr" "$publicKey" "$password" 1; then
+                echo -e "${GREEN}✓${NC}"
+                added=$((added + 1))
+            else
+                echo -e "${RED}✗${NC}"
+                failed=$((failed + 1))
+            fi
+        done < <(jq -r 'keys[]' "$peers_ipv6")
+
+        print_success "  IPv6: $added added, $failed failed"
+        total_added=$((total_added + added))
+        total_failed=$((total_failed + failed))
+    fi
+
+    echo
+    echo "═══════════════════════════════════════════════════════════════"
+    print_success "Runtime update complete!"
+    echo "═══════════════════════════════════════════════════════════════"
+    echo
+    echo "Summary:"
+    echo "  • Added $total_added peers to runtime"
+    if [ "$total_failed" -gt 0 ]; then
+        echo "  • Failed to add $total_failed peers"
+    fi
+    echo
+    print_warning "Remember: These peers are RUNTIME ONLY!"
+    print_info "To make them permanent, use the 'Peer Adding Wizard (Permanent config)'"
 }
 
 # Discover & Preview Peers (read-only)
@@ -2770,11 +3141,13 @@ main() {
 
         case "$choice" in
             1) peer_adding_wizard ;;
-            2) discover_preview ;;
-            3) guided_config_editor ;;
-            4) interactive_peer_management ;;
-            5) view_peer_status ;;
-            6) maintenance_menu ;;
+            2) peer_adding_wizard_runtime ;;
+            3) discover_preview ;;
+            4) guided_config_editor ;;
+            5) interactive_peer_management ;;
+            6) interactive_peer_disconnect_runtime ;;
+            7) view_peer_status ;;
+            8) maintenance_menu ;;
             0)
                 clear
                 print_ascii_header
