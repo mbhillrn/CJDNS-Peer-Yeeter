@@ -100,15 +100,90 @@ initialize() {
     # Check cjdnstool
     print_subheader "Checking cjdnstool"
 
-    local cjdnstool_version
-    if cjdnstool_version=$(check_cjdnstool); then
-        print_success "cjdnstool found: $cjdnstool_version"
+    local cjdnstool_info cjdnstool_type cjdnstool_version cjdnstool_path
+    if cjdnstool_info=$(check_cjdnstool); then
+        cjdnstool_type=$(echo "$cjdnstool_info" | cut -d'|' -f1)
+        cjdnstool_version=$(echo "$cjdnstool_info" | cut -d'|' -f2)
+        cjdnstool_path=$(echo "$cjdnstool_info" | cut -d'|' -f3)
+
+        if [ "$cjdnstool_type" = "nodejs" ]; then
+            print_success "cjdnstool found: Node.js v$cjdnstool_version (recommended)"
+        else
+            # Compiled/Rust version detected - warn user
+            print_warning "cjdnstool found: Compiled v$cjdnstool_version"
+            echo
+            echo -e "${YELLOW}╔════════════════════════════════════════════════════════════════════╗${NC}"
+            echo -e "${YELLOW}║  This program works best with cjdnstool (Node.js version)          ║${NC}"
+            echo -e "${YELLOW}║                                                                    ║${NC}"
+            echo -e "${YELLOW}║  You appear to be using the compiled Rust version which has        ║${NC}"
+            echo -e "${YELLOW}║  limited functionality (missing: ping, query, resolve, mon, etc.)  ║${NC}"
+            echo -e "${YELLOW}║                                                                    ║${NC}"
+            echo -e "${YELLOW}║  Recommended: cjdnstool (Node.js) - install via npm                ║${NC}"
+            echo -e "${YELLOW}║    Manual install: sudo npm install -g cjdnstool                   ║${NC}"
+            echo -e "${YELLOW}╚════════════════════════════════════════════════════════════════════╝${NC}"
+            echo
+
+            if ask_yes_no "Would you like to install the recommended Node.js version now?"; then
+                echo
+                if install_nodejs_cjdnstool; then
+                    print_success "Node.js cjdnstool installed successfully!"
+                    # Re-check to update info
+                    hash -r 2>/dev/null || true
+                    if cjdnstool_info=$(check_cjdnstool); then
+                        cjdnstool_type=$(echo "$cjdnstool_info" | cut -d'|' -f1)
+                        cjdnstool_version=$(echo "$cjdnstool_info" | cut -d'|' -f2)
+                        print_success "Now using: cjdnstool Node.js v$cjdnstool_version"
+                    fi
+                else
+                    print_error "Installation failed"
+                    echo
+                    print_warning "Some functions may not work properly with the compiled version."
+                    if ! ask_yes_no "Continue anyway?"; then
+                        echo "Exiting. Please install cjdnstool manually:"
+                        echo "  sudo npm install -g cjdnstool"
+                        exit 1
+                    fi
+                fi
+            else
+                echo
+                print_warning "Some functions may not work properly with the compiled version."
+                if ! ask_yes_no "Continue anyway?"; then
+                    echo "Exiting. Please install cjdnstool manually:"
+                    echo "  sudo npm install -g cjdnstool"
+                    exit 1
+                fi
+            fi
+        fi
     else
         print_error "cjdnstool not found"
         echo
         echo "cjdnstool is required to communicate with cjdns."
-        echo "Please install it from: https://github.com/furetosan/cjdnstool"
-        exit 1
+        echo
+        echo -e "${CYAN}Recommended installation:${NC}"
+        echo "  sudo npm install -g cjdnstool"
+        echo
+        echo "Alternative (limited features):"
+        echo "  https://github.com/cjdelisle/cjdnstool-rs"
+        echo
+
+        if command -v npm &>/dev/null; then
+            if ask_yes_no "Would you like to install cjdnstool now via npm?"; then
+                echo
+                if install_nodejs_cjdnstool; then
+                    print_success "cjdnstool installed successfully!"
+                    hash -r 2>/dev/null || true
+                else
+                    print_error "Installation failed. Please install manually."
+                    exit 1
+                fi
+            else
+                exit 1
+            fi
+        else
+            print_error "npm not found - cannot auto-install cjdnstool"
+            echo "Please install Node.js and npm, then run: sudo npm install -g cjdnstool"
+            exit 1
+        fi
     fi
 
     # Detect cjdns config and service
@@ -1444,7 +1519,7 @@ peer_adding_wizard_runtime() {
     echo -e "  ${ORANGE}$master_ipv6${NC} IPv6 addresses found"
     echo
 
-    # Step 3: Filter for new peers (not in config AND not currently connected)
+    # Step 3: Filter for new peers (not currently connected at runtime)
     print_subheader "Step 3: Finding New Peers"
 
     local discovered_ipv4="$WORK_DIR/discovered_ipv4.json"
@@ -1467,19 +1542,24 @@ peer_adding_wizard_runtime() {
         echo "{}" > "$discovered_ipv6"
     fi
 
-    # Smart duplicate detection
+    # For runtime wizard: compare against currently connected runtime peers (not config)
+    print_info "Checking against currently connected runtime peers..."
+    local runtime_peers_config="$WORK_DIR/runtime_peers_config.json"
+    get_runtime_peers_as_config "$ADMIN_IP" "$ADMIN_PORT" "$ADMIN_PASSWORD" "$runtime_peers_config"
+
+    # Smart duplicate detection (against runtime peers)
     local new_counts_ipv4="0|0"
     local new_counts_ipv6="0|0"
 
     if [ "$protocol" = "ipv4" ] || [ "$protocol" = "both" ]; then
-        new_counts_ipv4=$(smart_duplicate_check "$discovered_ipv4" "$CJDNS_CONFIG" 0 "$new_ipv4" "$updates_ipv4" 0)
+        new_counts_ipv4=$(smart_duplicate_check "$discovered_ipv4" "$runtime_peers_config" 0 "$new_ipv4" "$updates_ipv4" 0)
     else
         echo "{}" > "$new_ipv4"
         echo "{}" > "$updates_ipv4"
     fi
 
     if [ "$protocol" = "ipv6" ] || [ "$protocol" = "both" ]; then
-        new_counts_ipv6=$(smart_duplicate_check "$discovered_ipv6" "$CJDNS_CONFIG" 1 "$new_ipv6" "$updates_ipv6" 0)
+        new_counts_ipv6=$(smart_duplicate_check "$discovered_ipv6" "$runtime_peers_config" 1 "$new_ipv6" "$updates_ipv6" 0)
     else
         echo "{}" > "$new_ipv6"
         echo "{}" > "$updates_ipv6"
@@ -1490,12 +1570,12 @@ peer_adding_wizard_runtime() {
 
     echo
     echo "Summary:"
-    echo -e "  ${YELLOW}$new_ipv4_count${NC} new IPv4 peers not in config"
-    echo -e "  ${ORANGE}$new_ipv6_count${NC} new IPv6 peers not in config"
+    echo -e "  ${YELLOW}$new_ipv4_count${NC} new IPv4 peers not currently connected"
+    echo -e "  ${ORANGE}$new_ipv6_count${NC} new IPv6 peers not currently connected"
     echo
 
     if [ "$new_ipv4_count" -eq 0 ] && [ "$new_ipv6_count" -eq 0 ]; then
-        print_warning "No new peers to add"
+        print_warning "No new peers to add - all discovered peers are already connected"
         echo
         read -p "Press Enter to continue..."
         return

@@ -39,19 +39,24 @@ interactive_peer_management() {
         [ -n "$addr" ] && all_config_peers+=("$addr")
     done < <(jq -r '.interfaces.UDPInterface[1].connectTo // {} | keys[]' "$CJDNS_CONFIG" 2>/dev/null)
 
-    # Build arrays for gum display
-    declare -a peer_options=()
-    declare -a peer_addresses=()
-    declare -a peer_sources=()  # Track source for each peer
-    declare -a unresponsive_indices=()  # Track which indices are unresponsive
+    # Build temporary arrays for sorting - separate by source and state
+    declare -a cfg_connected_opts=() cfg_connected_addrs=()
+    declare -a cfg_unresponsive_opts=() cfg_unresponsive_addrs=()
+    declare -a cfg_other_opts=() cfg_other_addrs=()
+    declare -a dns_connected_opts=() dns_connected_addrs=()
+    declare -a dns_unresponsive_opts=() dns_unresponsive_addrs=()
+    declare -a dns_other_opts=() dns_other_addrs=()
+
     local all_peers=$(get_all_peers_by_quality)
 
     # Count stats
     local config_count=0
     local dns_count=0
 
-    # Add peers from database (with quality info)
-    local idx=0
+    # Track which addresses we've processed
+    declare -A processed_addrs
+
+    # Process peers from database (with quality info)
     while IFS='|' read -r address state quality est_count unr_count first_seen last_change consecutive; do
         [ -z "$address" ] && continue
 
@@ -75,43 +80,49 @@ interactive_peer_management() {
             [ "$in_config" = true ] && source="config" || source="dns"
         fi
 
-        local source_tag="[DNS]"
-        [ "$source" = "config" ] && source_tag="[CFG]" && config_count=$((config_count + 1)) || dns_count=$((dns_count + 1))
-
-        if [ "$state" = "ESTABLISHED" ]; then
-            status_icon="✓"
-            peer_options+=("$status_icon $source_tag $address | Q:$quality_display Est:$est_count Unr:$unr_count | Established $time_in_state")
-        elif [ "$state" = "UNRESPONSIVE" ]; then
-            status_icon="✗"
-            peer_options+=("$status_icon $source_tag $address | Q:$quality_display Est:$est_count Unr:$unr_count | Unresponsive $time_in_state (${consecutive}x)")
-            [ "$source" = "config" ] && unresponsive_indices+=("$idx")
+        local opt_line
+        if [ "$source" = "config" ]; then
+            config_count=$((config_count + 1))
+            if [ "$state" = "ESTABLISHED" ]; then
+                opt_line="✓ [CFG] $address | Q:$quality_display Est:$est_count Unr:$unr_count | Established $time_in_state"
+                cfg_connected_opts+=("$opt_line")
+                cfg_connected_addrs+=("$address")
+            elif [ "$state" = "UNRESPONSIVE" ]; then
+                opt_line="✗ [CFG] $address | Q:$quality_display Est:$est_count Unr:$unr_count | Unresponsive $time_in_state (${consecutive}x)"
+                cfg_unresponsive_opts+=("$opt_line")
+                cfg_unresponsive_addrs+=("$address")
+            else
+                opt_line="? [CFG] $address | Q:$quality_display Est:$est_count Unr:$unr_count | $state $time_in_state"
+                cfg_other_opts+=("$opt_line")
+                cfg_other_addrs+=("$address")
+            fi
         else
-            status_icon="?"
-            peer_options+=("$status_icon $source_tag $address | Q:$quality_display Est:$est_count Unr:$unr_count | $state $time_in_state")
+            dns_count=$((dns_count + 1))
+            if [ "$state" = "ESTABLISHED" ]; then
+                opt_line="✓ [DNS] $address | Runtime peer | Established $time_in_state"
+                dns_connected_opts+=("$opt_line")
+                dns_connected_addrs+=("$address")
+            elif [ "$state" = "UNRESPONSIVE" ]; then
+                opt_line="✗ [DNS] $address | Runtime peer | Unresponsive $time_in_state"
+                dns_unresponsive_opts+=("$opt_line")
+                dns_unresponsive_addrs+=("$address")
+            else
+                opt_line="? [DNS] $address | Runtime peer | $state $time_in_state"
+                dns_other_opts+=("$opt_line")
+                dns_other_addrs+=("$address")
+            fi
         fi
-
-        peer_addresses+=("$address")
-        peer_sources+=("$source")
-        idx=$((idx + 1))
+        processed_addrs["$(normalize_ipv6_address "$address")"]=1
     done <<< "$all_peers"
 
     # Add peers from config not yet in database
     for config_addr in "${all_config_peers[@]}"; do
-        local already_added=false
         local normalized_config=$(normalize_ipv6_address "$config_addr")
-        for addr in "${peer_addresses[@]}"; do
-            local normalized_addr=$(normalize_ipv6_address "$addr")
-            if [ "$normalized_config" = "$normalized_addr" ]; then
-                already_added=true
-                break
-            fi
-        done
-
-        if [ "$already_added" = false ]; then
-            peer_options+=("○ [CFG] $config_addr | Awaiting first check")
-            peer_addresses+=("$config_addr")
-            peer_sources+=("config")
+        if [ -z "${processed_addrs[$normalized_config]:-}" ]; then
+            cfg_other_opts+=("○ [CFG] $config_addr | Awaiting first check")
+            cfg_other_addrs+=("$config_addr")
             config_count=$((config_count + 1))
+            processed_addrs["$normalized_config"]=1
         fi
     done
 
@@ -120,36 +131,74 @@ interactive_peer_management() {
         # Only process DNS peers
         [ "${peer_source_map[$dns_addr]}" != "dns" ] && continue
 
-        # Check if already added
-        local already_added=false
         local normalized_dns=$(normalize_ipv6_address "$dns_addr")
-        for addr in "${peer_addresses[@]}"; do
-            local normalized_addr=$(normalize_ipv6_address "$addr")
-            if [ "$normalized_dns" = "$normalized_addr" ]; then
-                already_added=true
-                break
-            fi
-        done
-
-        if [ "$already_added" = false ]; then
+        if [ -z "${processed_addrs[$normalized_dns]:-}" ]; then
             local dns_state="${peer_state_map[$dns_addr]:-UNKNOWN}"
-            local status_icon="?"
-            local state_display="$dns_state"
 
             if [ "$dns_state" = "ESTABLISHED" ]; then
-                status_icon="✓"
-                state_display="Established (DNS)"
+                dns_connected_opts+=("✓ [DNS] $dns_addr | Runtime peer | Established")
+                dns_connected_addrs+=("$dns_addr")
             elif [ "$dns_state" = "UNRESPONSIVE" ]; then
-                status_icon="✗"
-                state_display="Unresponsive (DNS)"
+                dns_unresponsive_opts+=("✗ [DNS] $dns_addr | Runtime peer | Unresponsive")
+                dns_unresponsive_addrs+=("$dns_addr")
+            else
+                dns_other_opts+=("? [DNS] $dns_addr | Runtime peer | $dns_state")
+                dns_other_addrs+=("$dns_addr")
             fi
-
-            peer_options+=("$status_icon [DNS] $dns_addr | Runtime peer | $state_display")
-            peer_addresses+=("$dns_addr")
-            peer_sources+=("dns")
             dns_count=$((dns_count + 1))
-            idx=$((idx + 1))
+            processed_addrs["$normalized_dns"]=1
         fi
+    done
+
+    # Build final arrays in sorted order: CFG first (connected, other, unresponsive), then DNS
+    declare -a peer_options=()
+    declare -a peer_addresses=()
+    declare -a peer_sources=()
+    declare -a unresponsive_indices=()
+
+    local idx=0
+    # CFG connected
+    for i in "${!cfg_connected_opts[@]}"; do
+        peer_options+=("${cfg_connected_opts[$i]}")
+        peer_addresses+=("${cfg_connected_addrs[$i]}")
+        peer_sources+=("config")
+        idx=$((idx + 1))
+    done
+    # CFG other (awaiting check, etc)
+    for i in "${!cfg_other_opts[@]}"; do
+        peer_options+=("${cfg_other_opts[$i]}")
+        peer_addresses+=("${cfg_other_addrs[$i]}")
+        peer_sources+=("config")
+        idx=$((idx + 1))
+    done
+    # CFG unresponsive
+    for i in "${!cfg_unresponsive_opts[@]}"; do
+        peer_options+=("${cfg_unresponsive_opts[$i]}")
+        peer_addresses+=("${cfg_unresponsive_addrs[$i]}")
+        peer_sources+=("config")
+        unresponsive_indices+=("$idx")
+        idx=$((idx + 1))
+    done
+    # DNS connected
+    for i in "${!dns_connected_opts[@]}"; do
+        peer_options+=("${dns_connected_opts[$i]}")
+        peer_addresses+=("${dns_connected_addrs[$i]}")
+        peer_sources+=("dns")
+        idx=$((idx + 1))
+    done
+    # DNS other
+    for i in "${!dns_other_opts[@]}"; do
+        peer_options+=("${dns_other_opts[$i]}")
+        peer_addresses+=("${dns_other_addrs[$i]}")
+        peer_sources+=("dns")
+        idx=$((idx + 1))
+    done
+    # DNS unresponsive
+    for i in "${!dns_unresponsive_opts[@]}"; do
+        peer_options+=("${dns_unresponsive_opts[$i]}")
+        peer_addresses+=("${dns_unresponsive_addrs[$i]}")
+        peer_sources+=("dns")
+        idx=$((idx + 1))
     done
 
     if [ ${#peer_options[@]} -eq 0 ]; then
@@ -402,16 +451,16 @@ interactive_peer_disconnect_runtime() {
         [ -n "$addr" ] && all_config_peers+=("$addr")
     done < <(jq -r '.interfaces.UDPInterface[1].connectTo // {} | keys[]' "$CJDNS_CONFIG" 2>/dev/null)
 
-    # Build arrays for gum display
-    declare -a peer_options=()
-    declare -a peer_pubkeys=()
-    declare -a peer_addresses=()
-    declare -a peer_sources=()
-    declare -a unresponsive_indices=()
+    # Build temporary arrays for sorting - separate by source and state
+    declare -a cfg_connected_opts=() cfg_connected_addrs=() cfg_connected_keys=()
+    declare -a cfg_unresponsive_opts=() cfg_unresponsive_addrs=() cfg_unresponsive_keys=()
+    declare -a cfg_other_opts=() cfg_other_addrs=() cfg_other_keys=()
+    declare -a dns_connected_opts=() dns_connected_addrs=() dns_connected_keys=()
+    declare -a dns_unresponsive_opts=() dns_unresponsive_addrs=() dns_unresponsive_keys=()
+    declare -a dns_other_opts=() dns_other_addrs=() dns_other_keys=()
 
     local config_count=0
     local dns_count=0
-    local idx=0
 
     while IFS='|' read -r state address pubkey; do
         [ -z "$address" ] && continue
@@ -427,32 +476,103 @@ interactive_peer_disconnect_runtime() {
             fi
         done
 
-        local source_tag="[DNS]"
+        local opt_line
         if [ "$source" = "config" ]; then
-            source_tag="[CFG]"
             config_count=$((config_count + 1))
+            if [ "$state" = "ESTABLISHED" ]; then
+                opt_line="✓ [CFG] $address | Runtime peer | Connected"
+                cfg_connected_opts+=("$opt_line")
+                cfg_connected_addrs+=("$address")
+                cfg_connected_keys+=("$pubkey")
+            elif [ "$state" = "UNRESPONSIVE" ]; then
+                opt_line="✗ [CFG] $address | Runtime peer | Unresponsive"
+                cfg_unresponsive_opts+=("$opt_line")
+                cfg_unresponsive_addrs+=("$address")
+                cfg_unresponsive_keys+=("$pubkey")
+            else
+                opt_line="? [CFG] $address | Runtime peer | $state"
+                cfg_other_opts+=("$opt_line")
+                cfg_other_addrs+=("$address")
+                cfg_other_keys+=("$pubkey")
+            fi
         else
             dns_count=$((dns_count + 1))
+            if [ "$state" = "ESTABLISHED" ]; then
+                opt_line="✓ [DNS] $address | Runtime peer | Connected"
+                dns_connected_opts+=("$opt_line")
+                dns_connected_addrs+=("$address")
+                dns_connected_keys+=("$pubkey")
+            elif [ "$state" = "UNRESPONSIVE" ]; then
+                opt_line="✗ [DNS] $address | Runtime peer | Unresponsive"
+                dns_unresponsive_opts+=("$opt_line")
+                dns_unresponsive_addrs+=("$address")
+                dns_unresponsive_keys+=("$pubkey")
+            else
+                opt_line="? [DNS] $address | Runtime peer | $state"
+                dns_other_opts+=("$opt_line")
+                dns_other_addrs+=("$address")
+                dns_other_keys+=("$pubkey")
+            fi
         fi
-
-        local status_icon
-        if [ "$state" = "ESTABLISHED" ]; then
-            status_icon="✓"
-            peer_options+=("$status_icon $source_tag $address | Connected")
-        elif [ "$state" = "UNRESPONSIVE" ]; then
-            status_icon="✗"
-            peer_options+=("$status_icon $source_tag $address | Unresponsive")
-            [ "$source" = "config" ] && unresponsive_indices+=("$idx")
-        else
-            status_icon="?"
-            peer_options+=("$status_icon $source_tag $address | $state")
-        fi
-
-        peer_addresses+=("$address")
-        peer_pubkeys+=("$pubkey")
-        peer_sources+=("$source")
-        idx=$((idx + 1))
     done < "$peer_data"
+
+    # Build final arrays in sorted order: CFG first (connected, other, unresponsive), then DNS
+    declare -a peer_options=()
+    declare -a peer_addresses=()
+    declare -a peer_pubkeys=()
+    declare -a peer_sources=()
+    declare -a unresponsive_indices=()
+
+    local idx=0
+    # CFG connected
+    for i in "${!cfg_connected_opts[@]}"; do
+        peer_options+=("${cfg_connected_opts[$i]}")
+        peer_addresses+=("${cfg_connected_addrs[$i]}")
+        peer_pubkeys+=("${cfg_connected_keys[$i]}")
+        peer_sources+=("config")
+        idx=$((idx + 1))
+    done
+    # CFG other
+    for i in "${!cfg_other_opts[@]}"; do
+        peer_options+=("${cfg_other_opts[$i]}")
+        peer_addresses+=("${cfg_other_addrs[$i]}")
+        peer_pubkeys+=("${cfg_other_keys[$i]}")
+        peer_sources+=("config")
+        idx=$((idx + 1))
+    done
+    # CFG unresponsive
+    for i in "${!cfg_unresponsive_opts[@]}"; do
+        peer_options+=("${cfg_unresponsive_opts[$i]}")
+        peer_addresses+=("${cfg_unresponsive_addrs[$i]}")
+        peer_pubkeys+=("${cfg_unresponsive_keys[$i]}")
+        peer_sources+=("config")
+        unresponsive_indices+=("$idx")
+        idx=$((idx + 1))
+    done
+    # DNS connected
+    for i in "${!dns_connected_opts[@]}"; do
+        peer_options+=("${dns_connected_opts[$i]}")
+        peer_addresses+=("${dns_connected_addrs[$i]}")
+        peer_pubkeys+=("${dns_connected_keys[$i]}")
+        peer_sources+=("dns")
+        idx=$((idx + 1))
+    done
+    # DNS other
+    for i in "${!dns_other_opts[@]}"; do
+        peer_options+=("${dns_other_opts[$i]}")
+        peer_addresses+=("${dns_other_addrs[$i]}")
+        peer_pubkeys+=("${dns_other_keys[$i]}")
+        peer_sources+=("dns")
+        idx=$((idx + 1))
+    done
+    # DNS unresponsive
+    for i in "${!dns_unresponsive_opts[@]}"; do
+        peer_options+=("${dns_unresponsive_opts[$i]}")
+        peer_addresses+=("${dns_unresponsive_addrs[$i]}")
+        peer_pubkeys+=("${dns_unresponsive_keys[$i]}")
+        peer_sources+=("dns")
+        idx=$((idx + 1))
+    done
 
     if [ ${#peer_options[@]} -eq 0 ]; then
         print_warning "No peers currently connected"
