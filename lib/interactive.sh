@@ -239,10 +239,10 @@ interactive_peer_management() {
     done
 
     # Parse selected peers - extract address and determine source
-    declare -a selected_addresses
-    declare -a selected_sources
-    declare -a config_addresses  # Only config peers can be removed
-    declare -a dns_addresses     # DNS peers - just for display
+    declare -a selected_addresses=()
+    declare -a selected_sources=()
+    declare -a config_addresses=()  # Only config peers can be removed
+    declare -a dns_addresses=()     # DNS peers - just for display
 
     while IFS= read -r line; do
         # Extract source tag and address from the display string
