@@ -113,13 +113,13 @@ initialize() {
             print_warning "cjdnstool found: Compiled v$cjdnstool_version"
             echo
             echo -e "${YELLOW}╔════════════════════════════════════════════════════════════════════╗${NC}"
-            echo -e "${YELLOW}║  This program works best with cjdnstool (Node.js version)         ║${NC}"
+            echo -e "${YELLOW}║  This program works best with cjdnstool (Node.js version)          ║${NC}"
             echo -e "${YELLOW}║                                                                    ║${NC}"
-            echo -e "${YELLOW}║  You are currently using the compiled Rust version which has      ║${NC}"
-            echo -e "${YELLOW}║  limited functionality (missing: ping, query, resolve, mon, etc.) ║${NC}"
+            echo -e "${YELLOW}║  You are currently using the compiled Rust version which has       ║${NC}"
+            echo -e "${YELLOW}║  limited functionality (missing: ping, query, resolve, mon, etc.)  ║${NC}"
             echo -e "${YELLOW}║                                                                    ║${NC}"
-            echo -e "${YELLOW}║  Recommended: cjdnstool (Node.js) - install via npm               ║${NC}"
-            echo -e "${YELLOW}║    Manual install: sudo npm install -g cjdnstool                  ║${NC}"
+            echo -e "${YELLOW}║  Recommended: cjdnstool (Node.js) - install via npm                ║${NC}"
+            echo -e "${YELLOW}║    Manual install: sudo npm install -g cjdnstool                   ║${NC}"
             echo -e "${YELLOW}╚════════════════════════════════════════════════════════════════════╝${NC}"
             echo
 
