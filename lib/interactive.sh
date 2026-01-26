@@ -426,7 +426,7 @@ interactive_file_deletion() {
     local selected=""
     local gum_exit=0
     # Handle ESC/cancellation gracefully
-    if selected=$(gum choose --no-limit --height 20 "${file_options[@]}" </dev/tty >/dev/tty 2>&1); then
+    if selected=$(gum choose --no-limit --height 20 "${file_options[@]}" </dev/tty 2>/dev/tty); then
         gum_exit=0
     else
         gum_exit=$?
@@ -796,7 +796,7 @@ toggle_peer_source() {
     echo
 
     local selected
-    selected=$(gum choose --height 15 "${sources[@]}" </dev/tty >/dev/tty 2>&1)
+    selected=$(gum choose --height 15 "${sources[@]}" </dev/tty 2>/dev/tty)
     local gum_exit=$?
 
     if [ $gum_exit -ne 0 ] || [ -z "$selected" ]; then
@@ -837,7 +837,7 @@ add_peer_source() {
     echo
 
     local type
-    type=$(gum choose --height 6 "github" "json" </dev/tty >/dev/tty 2>&1)
+    type=$(gum choose --height 6 "github" "json" </dev/tty 2>/dev/tty)
     local gum_exit=$?
     [ $gum_exit -ne 0 ] || [ -z "$type" ] && return
 
@@ -879,7 +879,7 @@ remove_peer_source() {
     echo
 
     local selected
-    selected=$(gum choose --height 15 "${sources[@]}" </dev/tty >/dev/tty 2>&1)
+    selected=$(gum choose --height 15 "${sources[@]}" </dev/tty 2>/dev/tty)
     local gum_exit=$?
 
     if [ $gum_exit -ne 0 ] || [ -z "$selected" ]; then
