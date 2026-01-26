@@ -116,14 +116,31 @@ is_recommended_cjdnstool() {
 
 # Install the recommended Node.js cjdnstool
 install_nodejs_cjdnstool() {
-    # Check if npm is available
+    # Check if npm is available, if not, try to install it
     if ! command -v npm &>/dev/null; then
-        echo "npm is required to install cjdnstool but was not found."
-        echo "Please install Node.js and npm first."
-        return 1
+        echo "npm not found - attempting to install Node.js and npm..."
+        echo
+
+        if ! install_nodejs_npm; then
+            echo "Failed to install Node.js and npm."
+            echo "Please install them manually, then run: sudo npm install -g cjdnstool"
+            return 1
+        fi
+
+        # Refresh path
+        hash -r 2>/dev/null || true
+
+        if ! command -v npm &>/dev/null; then
+            echo "npm still not found after installation attempt."
+            echo "Please install Node.js and npm manually."
+            return 1
+        fi
+
+        echo "Node.js and npm installed successfully!"
+        echo
     fi
 
-    echo "Installing cjdnstool via npm (this may require sudo)..."
+    echo "Installing cjdnstool via npm..."
     echo
 
     if sudo npm install -g cjdnstool 2>&1; then
@@ -143,6 +160,51 @@ install_nodejs_cjdnstool() {
         echo "Installation failed"
         return 1
     fi
+}
+
+# Install Node.js and npm based on detected package manager
+install_nodejs_npm() {
+    local pkg_manager=""
+
+    # Detect package manager
+    if command -v apt-get &>/dev/null; then
+        pkg_manager="apt"
+    elif command -v dnf &>/dev/null; then
+        pkg_manager="dnf"
+    elif command -v yum &>/dev/null; then
+        pkg_manager="yum"
+    elif command -v pacman &>/dev/null; then
+        pkg_manager="pacman"
+    elif command -v apk &>/dev/null; then
+        pkg_manager="apk"
+    else
+        echo "Could not detect package manager (apt, dnf, yum, pacman, apk)"
+        return 1
+    fi
+
+    echo "Detected package manager: $pkg_manager"
+    echo "Installing Node.js and npm (this may take a moment)..."
+    echo
+
+    case "$pkg_manager" in
+        apt)
+            sudo apt-get update -qq && sudo apt-get install -y nodejs npm
+            ;;
+        dnf)
+            sudo dnf install -y nodejs npm
+            ;;
+        yum)
+            sudo yum install -y nodejs npm
+            ;;
+        pacman)
+            sudo pacman -Sy --noconfirm nodejs npm
+            ;;
+        apk)
+            sudo apk add --no-cache nodejs npm
+            ;;
+    esac
+
+    return $?
 }
 
 # Get currently connected runtime peers as a fake config JSON (for duplicate checking)
