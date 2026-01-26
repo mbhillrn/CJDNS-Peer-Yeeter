@@ -140,17 +140,34 @@ install_nodejs_cjdnstool() {
         echo
     fi
 
+    # Check if there's an existing non-Node.js cjdnstool that needs to be removed
+    local existing_cjdnstool=$(command -v cjdnstool 2>/dev/null || true)
+    if [ -n "$existing_cjdnstool" ]; then
+        local real_path=$(readlink -f "$existing_cjdnstool" 2>/dev/null || echo "$existing_cjdnstool")
+        # If it's NOT a Node.js script (i.e., it's the compiled version), remove it
+        if ! file "$real_path" 2>/dev/null | grep -qi "node\|script\|text"; then
+            echo "Removing existing compiled cjdnstool at $existing_cjdnstool..."
+            if sudo rm -f "$existing_cjdnstool"; then
+                echo "Removed successfully."
+                hash -r 2>/dev/null || true
+            else
+                echo "Warning: Could not remove existing cjdnstool. Trying npm install with --force..."
+            fi
+            echo
+        fi
+    fi
+
     echo "Installing cjdnstool via npm..."
     echo
 
-    if sudo npm install -g cjdnstool 2>&1; then
+    # Use --force to overwrite any remaining conflicts
+    if sudo npm install -g --force cjdnstool 2>&1; then
         echo
         echo "Installation complete!"
 
         # Verify installation
+        hash -r 2>/dev/null || true
         if command -v cjdnstool &>/dev/null; then
-            # Clear bash's command cache
-            hash -r 2>/dev/null || true
             return 0
         else
             echo "Warning: cjdnstool installed but not found in PATH"

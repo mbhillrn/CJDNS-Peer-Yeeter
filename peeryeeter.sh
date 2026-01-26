@@ -146,9 +146,12 @@ initialize() {
                 fi
             else
                 echo
-                print_warning "Continuing with compiled cjdnstool - some functions may not work properly."
-                echo
-                read -p "Press Enter to continue..."
+                print_warning "Some functions may not work properly with the compiled version."
+                if ! ask_yes_no "Continue anyway?"; then
+                    echo "Exiting. Please install cjdnstool manually:"
+                    echo "  sudo npm install -g cjdnstool"
+                    exit 1
+                fi
             fi
         fi
     else
