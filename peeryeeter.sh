@@ -1293,9 +1293,20 @@ runtime_add_peer() {
 
     local exit_code=$?
 
-    if [ $exit_code -eq 0 ] && echo "$result" | jq -e '.error == "none"' &>/dev/null; then
-        return 0
+    # Check for success
+    if [ $exit_code -eq 0 ]; then
+        local error_msg
+        error_msg=$(echo "$result" | jq -r '.error // "unknown"' 2>/dev/null)
+
+        if [ "$error_msg" = "none" ]; then
+            return 0
+        else
+            # Store error message for display
+            LAST_PEER_ERROR="$error_msg"
+            return 1
+        fi
     else
+        LAST_PEER_ERROR="cjdnstool failed (exit code: $exit_code)"
         return 1
     fi
 }
@@ -1581,11 +1592,12 @@ runtime_wizard_add_peers() {
 
             echo -n "  $addr... "
 
+            LAST_PEER_ERROR=""
             if runtime_add_peer "$addr" "$publicKey" "$password" 0; then
                 echo -e "${GREEN}✓${NC}"
                 added=$((added + 1))
             else
-                echo -e "${RED}✗${NC}"
+                echo -e "${RED}✗${NC} ${DIM}($LAST_PEER_ERROR)${NC}"
                 failed=$((failed + 1))
             fi
         done < <(jq -r 'keys[]' "$peers_ipv4")
@@ -1610,11 +1622,12 @@ runtime_wizard_add_peers() {
 
             echo -n "  $addr... "
 
+            LAST_PEER_ERROR=""
             if runtime_add_peer "$addr" "$publicKey" "$password" 1; then
                 echo -e "${GREEN}✓${NC}"
                 added=$((added + 1))
             else
-                echo -e "${RED}✗${NC}"
+                echo -e "${RED}✗${NC} ${DIM}($LAST_PEER_ERROR)${NC}"
                 failed=$((failed + 1))
             fi
         done < <(jq -r 'keys[]' "$peers_ipv6")
