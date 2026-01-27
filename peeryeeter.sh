@@ -199,7 +199,7 @@ initialize() {
         print_success "Detected config file: $CJDNS_CONFIG"
         echo
 
-        if ! ask_yes_no "Are these settings correct?"; then
+        if ! ask_yes_no_default "Are these settings correct?" "y"; then
             CJDNS_CONFIG=""
             CJDNS_SERVICE=""
         else
@@ -424,16 +424,146 @@ show_menu() {
     echo "Config: $CJDNS_CONFIG"
     echo "Backup: $BACKUP_DIR"
     echo
-    echo "1) 🧙 Peer Adding Wizard (Permanent config)"
-    echo "2) ⚡ Peer Adding Wizard (Runtime)"
-    echo "3) 🔍 Discover & Preview Peers"
-    echo "4) ✏️  Edit Config File"
-    echo "5) 🗑️  View Status & Remove Peers (Permanent config)"
-    echo "6) 🔌 View Status & Disconnect Peers (Runtime)"
-    echo "7) 📊 View Peer Status"
-    echo "8) ⚙️  Maintenance & Settings"
-    echo "0) Exit"
+
+    # CJDNS Peer Options section
+    echo -e "${BOLD}${WHITE}CJDNS Peer Options:${NC}"
     echo
+    echo "  1) 📊 View Peer Status"
+    echo -e "     ${GRAY}└─ Current peer connections and health${NC}"
+    echo
+    echo "  2) ⚡ Temporary Peer Functions"
+    echo -e "     ${GRAY}└─ View status & disconnect, add wizard (runtime)${NC}"
+    echo
+    echo "  3) 💾 Permanent Peer Functions ${YELLOW}(requires CJDNS restart)${NC}"
+    echo -e "     ${GRAY}└─ View status & remove, add wizard (config)${NC}"
+    echo
+
+    # Config File Options section
+    echo -e "${BOLD}${WHITE}Config File Options:${NC}"
+    echo
+    echo "  4) ✏️  Edit Configuration File ${YELLOW}(requires CJDNS restart)${NC}"
+    echo -e "     ${GRAY}└─ Add/edit/view peers, public peering, passwords, admin settings${NC}"
+    echo
+    echo "  5) 📁 Configuration File Management"
+    echo -e "     ${GRAY}└─ Backup/restore config, import/export peers, manage backups${NC}"
+    echo
+
+    # Peer Yeeter Program Settings section
+    echo -e "${BOLD}${WHITE}Peer Yeeter Program Settings:${NC}"
+    echo
+    echo "  6) 🔍 Test Discovery & Preview Peers"
+    echo -e "     ${GRAY}└─ Update address database and test discovery without changes${NC}"
+    echo
+    echo "  7) ⚙️  Peer Yeeter Settings"
+    echo -e "     ${GRAY}└─ Program settings, online sources, local database management${NC}"
+    echo
+
+    # Restart CJDNS Service section
+    echo -e "${BOLD}${WHITE}Service:${NC}"
+    echo
+    echo "  8) 🔄 Restart CJDNS Service"
+    echo -e "     ${GRAY}└─ Restart the local CJDNS service${NC}"
+    echo
+
+    # Exit
+    echo -e "${BOLD}${WHITE}Exit:${NC}"
+    echo
+    echo "  0) Exit"
+    echo
+}
+
+# Temporary Peer Functions Menu (Runtime operations)
+temporary_peer_menu() {
+    while true; do
+        clear
+        print_ascii_header
+        print_header "Temporary Peer Functions (Runtime)"
+
+        echo -e "${GRAY}These changes take effect immediately but are lost on CJDNS restart.${NC}"
+        echo
+
+        echo "  1) 🔌 View Status & Disconnect Peers"
+        echo -e "     ${GRAY}└─ View current runtime peers and disconnect selected ones${NC}"
+        echo
+        echo "  2) ⚡ Peer Adding Wizard (Runtime)"
+        echo -e "     ${GRAY}└─ Add peers temporarily without modifying config file${NC}"
+        echo
+        echo "  0) Back to Main Menu"
+        echo
+
+        local choice
+        read -p "Enter choice: " choice < /dev/tty
+
+        case "$choice" in
+            1) interactive_peer_disconnect_runtime ;;
+            2) peer_adding_wizard_runtime ;;
+            0) return ;;
+            *) print_error "Invalid choice"; sleep 1 ;;
+        esac
+    done
+}
+
+# Permanent Peer Functions Menu (Config operations)
+permanent_peer_menu() {
+    while true; do
+        clear
+        print_ascii_header
+        print_header "Permanent Peer Functions (Config)"
+
+        echo -e "${YELLOW}These changes modify the config file and require a CJDNS restart.${NC}"
+        echo
+
+        echo "  1) 🗑️  View Status & Remove Peers"
+        echo -e "     ${GRAY}└─ View config peers and remove selected ones permanently${NC}"
+        echo
+        echo "  2) 🧙 Peer Adding Wizard (Config)"
+        echo -e "     ${GRAY}└─ Add peers permanently to configuration file${NC}"
+        echo
+        echo "  0) Back to Main Menu"
+        echo
+
+        local choice
+        read -p "Enter choice: " choice < /dev/tty
+
+        case "$choice" in
+            1) interactive_peer_management ;;
+            2) peer_adding_wizard ;;
+            0) return ;;
+            *) print_error "Invalid choice"; sleep 1 ;;
+        esac
+    done
+}
+
+# Peer Yeeter Settings Menu
+peeryeeter_settings_menu() {
+    while true; do
+        clear
+        print_ascii_header
+        print_header "Peer Yeeter Settings"
+
+        echo "  1) ⚙️  Peer Yeeter Program Settings"
+        echo -e "     ${GRAY}└─ Change config file, service name, backup directory${NC}"
+        echo
+        echo "  2) 🌐 Online Sources Management"
+        echo -e "     ${GRAY}└─ Enable/disable/add/remove peer address sources${NC}"
+        echo
+        echo "  3) 💾 Local Address Database Management"
+        echo -e "     ${GRAY}└─ Backup, restore, or reset the local peer database${NC}"
+        echo
+        echo "  0) Back to Main Menu"
+        echo
+
+        local choice
+        read -p "Enter choice: " choice < /dev/tty
+
+        case "$choice" in
+            1) configuration_settings_menu ;;
+            2) peer_sources_menu ;;
+            3) database_management_menu ;;
+            0) return ;;
+            *) print_error "Invalid choice"; sleep 1 ;;
+        esac
+    done
 }
 
 # Check if config is normalized (only password+publicKey in connectTo)
@@ -2263,12 +2393,12 @@ view_peer_status() {
     read -p "Press Enter to continue..."
 }
 
-# Configuration Settings Submenu
+# Peer Yeeter Program Settings Submenu
 configuration_settings_menu() {
     while true; do
         clear
         print_ascii_header
-        print_header "Configuration Settings"
+        print_header "Peer Yeeter Program Settings"
 
         echo "Current Configuration:"
         echo "  Config File: $CJDNS_CONFIG"
@@ -2276,15 +2406,15 @@ configuration_settings_menu() {
         echo "  Backup Directory: $BACKUP_DIR"
         echo
 
-        echo "1) Change Config File Location"
-        echo "2) Change Service Name"
-        echo "3) Change Backup Directory (with migration)"
+        echo "  1) Change Config File Location"
+        echo "  2) Change Service Name"
+        echo "  3) Change Backup Directory (with migration)"
         echo
-        echo "0) Back to Maintenance Menu"
+        echo "  0) Back to Peer Yeeter Settings"
         echo
 
         local choice
-        read -p "Enter choice: " choice < /dev/tty < /dev/tty
+        read -p "Enter choice: " choice < /dev/tty
 
         case "$choice" in
             1) change_config_location ;;
@@ -2296,12 +2426,12 @@ configuration_settings_menu() {
     done
 }
 
-# Peer Sources Management Submenu
+# Online Sources Management Submenu
 peer_sources_menu() {
     while true; do
         clear
         print_ascii_header
-        print_header "Peer Sources Management"
+        print_header "Online Sources Management"
 
         # Load and display sources
         echo "Current Peer Sources:"
@@ -2330,16 +2460,16 @@ peer_sources_menu() {
         fi
         echo
 
-        echo "1) Enable/Disable a Source"
-        echo "2) Add New Source"
-        echo "3) Remove Source"
-        echo "4) Reset Local Address Database"
+        echo "  1) Enable/Disable a Source"
+        echo "  2) Add New Source"
+        echo "  3) Remove Source"
+        echo "  4) Reset Local Address Database"
         echo
-        echo "0) Back to Maintenance Menu"
+        echo "  0) Back to Peer Yeeter Settings"
         echo
 
         local choice
-        read -p "Enter choice: " choice < /dev/tty < /dev/tty
+        read -p "Enter choice: " choice < /dev/tty
 
         case "$choice" in
             1) toggle_peer_source_menu ;;
@@ -2352,22 +2482,22 @@ peer_sources_menu() {
     done
 }
 
-# Database Management Submenu
+# Local Address Database Management Submenu
 database_management_menu() {
     while true; do
         clear
         print_ascii_header
-        print_header "Database Management"
+        print_header "Local Address Database Management"
 
-        echo "1) Backup Database"
-        echo "2) Restore Database from Backup"
-        echo "3) Reset Database (Clear all peer tracking data)"
+        echo "  1) Backup Database"
+        echo "  2) Restore Database from Backup"
+        echo "  3) Reset Database (Clear all peer tracking data)"
         echo
-        echo "0) Back to Maintenance Menu"
+        echo "  0) Back to Peer Yeeter Settings"
         echo
 
         local choice
-        read -p "Enter choice: " choice < /dev/tty < /dev/tty
+        read -p "Enter choice: " choice < /dev/tty
 
         case "$choice" in
             1) database_backup_menu ;;
@@ -2379,12 +2509,12 @@ database_management_menu() {
     done
 }
 
-# File Management Submenu
-file_management_menu() {
+# Configuration File Management Menu (formerly File Management)
+config_file_management_menu() {
     while true; do
         clear
         print_ascii_header
-        print_header "File Management"
+        print_header "Configuration File Management"
 
         # Count files
         local backup_count=$(ls -1 "$BACKUP_DIR"/cjdroute_backup_*.conf 2>/dev/null | wc -l)
@@ -2395,57 +2525,37 @@ file_management_menu() {
         echo "  Exported Peer Files: $export_count"
         echo
 
-        echo "1) Delete Old Config Backups (multi-select)"
-        echo "2) Delete Exported Peer Files (multi-select)"
-        echo "3) Import Peers from File"
-        echo "4) Export Peers to File"
-        echo "5) Backup Config File"
-        echo "6) Restore Config from Backup"
+        echo "  1) 💾 Backup Config File"
+        echo -e "     ${GRAY}└─ Create a backup of current configuration${NC}"
         echo
-        echo "0) Back to Maintenance Menu"
+        echo "  2) 📥 Restore Config from Backup"
+        echo -e "     ${GRAY}└─ Restore configuration from a previous backup${NC}"
         echo
-
-        local choice
-        read -p "Enter choice: " choice < /dev/tty < /dev/tty
-
-        case "$choice" in
-            1) interactive_file_deletion "backup" ;;
-            2) interactive_file_deletion "export" ;;
-            3) import_peers_menu ;;
-            4) export_peers_menu ;;
-            5) backup_config_menu ;;
-            6) restore_config_menu ;;
-            0) return ;;
-            *) print_error "Invalid choice"; sleep 1 ;;
-        esac
-    done
-}
-
-# Maintenance Menu
-maintenance_menu() {
-    while true; do
-        clear
-        print_ascii_header
-        print_header "Maintenance & Settings"
-
-        echo "1) ⚙️  Configuration Settings"
-        echo "2) 🌐 Peer Sources Management"
-        echo "3) 💾 Database Management"
-        echo "4) 📁 File Management"
-        echo "5) 🔄 Restart cjdns Service"
+        echo "  3) 📤 Export Peers to File"
+        echo -e "     ${GRAY}└─ Export current peers to a portable file${NC}"
         echo
-        echo "0) Back to Main Menu"
+        echo "  4) 📥 Import Peers from File"
+        echo -e "     ${GRAY}└─ Import peers from an exported file${NC}"
+        echo
+        echo "  5) 🗑️  Delete Old Config Backups"
+        echo -e "     ${GRAY}└─ Remove old backup files (multi-select)${NC}"
+        echo
+        echo "  6) 🗑️  Delete Exported Peer Files"
+        echo -e "     ${GRAY}└─ Remove exported peer files (multi-select)${NC}"
+        echo
+        echo "  0) Back to Main Menu"
         echo
 
         local choice
-        read -p "Enter choice: " choice < /dev/tty < /dev/tty
+        read -p "Enter choice: " choice < /dev/tty
 
         case "$choice" in
-            1) configuration_settings_menu ;;
-            2) peer_sources_menu ;;
-            3) database_management_menu ;;
-            4) file_management_menu ;;
-            5) restart_service ;;
+            1) backup_config_menu ;;
+            2) restore_config_menu ;;
+            3) export_peers_menu ;;
+            4) import_peers_menu ;;
+            5) interactive_file_deletion "backup" ;;
+            6) interactive_file_deletion "export" ;;
             0) return ;;
             *) print_error "Invalid choice"; sleep 1 ;;
         esac
@@ -3248,17 +3358,17 @@ main() {
         show_menu
 
         local choice
-        read -p "Enter choice: " choice < /dev/tty < /dev/tty < /dev/tty
+        read -p "Enter choice: " choice < /dev/tty
 
         case "$choice" in
-            1) peer_adding_wizard ;;
-            2) peer_adding_wizard_runtime ;;
-            3) discover_preview ;;
+            1) view_peer_status ;;
+            2) temporary_peer_menu ;;
+            3) permanent_peer_menu ;;
             4) guided_config_editor ;;
-            5) interactive_peer_management ;;
-            6) interactive_peer_disconnect_runtime ;;
-            7) view_peer_status ;;
-            8) maintenance_menu ;;
+            5) config_file_management_menu ;;
+            6) discover_preview ;;
+            7) peeryeeter_settings_menu ;;
+            8) restart_service ;;
             0)
                 clear
                 print_ascii_header

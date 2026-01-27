@@ -77,6 +77,44 @@ ask_yes_no() {
     done
 }
 
+# Ask yes/no question with a default value (Enter accepts default)
+# Usage: ask_yes_no_default "prompt" "y"  or  ask_yes_no_default "prompt" "n"
+ask_yes_no_default() {
+    local prompt="$1"
+    local default="${2:-y}"
+    local response
+    local hint
+
+    if [ "$default" = "y" ] || [ "$default" = "Y" ]; then
+        hint="Y/n"
+    else
+        hint="y/N"
+    fi
+
+    while true; do
+        read -p "$prompt ($hint): " -r response < /dev/tty
+        # Empty response = use default
+        if [ -z "$response" ]; then
+            if [ "$default" = "y" ] || [ "$default" = "Y" ]; then
+                return 0
+            else
+                return 1
+            fi
+        fi
+        case "$response" in
+            [Yy]|[Yy][Ee][Ss])
+                return 0
+                ;;
+            [Nn]|[Nn][Oo])
+                return 1
+                ;;
+            *)
+                print_error "Please answer 'y' or 'n' (or Enter for default)"
+                ;;
+        esac
+    done
+}
+
 # Ask user to select from a list
 ask_selection() {
     local prompt="$1"
