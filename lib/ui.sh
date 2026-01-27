@@ -176,15 +176,16 @@ ask_input() {
     fi
 }
 
-# Print section header (light blue/cyan borders like the ascii header)
+# Print section header with integrated ASCII art (consistent across all pages)
 print_header() {
     local title="$1"
     local width=60
     echo
     echo -e "${CYAN}${BOLD}$(printf '=%.0s' $(seq 1 $width))${NC}"
+    echo -e "${BLUE}                 (╯°□°)╯︵  P E E R S${NC}"
+    echo -e "${CYAN}-------------------${NC}${BLUE}└──CJDNS─PeerYeeter──┘${NC}${CYAN}-------------------${NC}"
     echo -e "${CYAN}${BOLD}$title${NC}"
     echo -e "${CYAN}${BOLD}$(printf '=%.0s' $(seq 1 $width))${NC}"
-    echo
 }
 
 # Print sub-header
