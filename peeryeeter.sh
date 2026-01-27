@@ -419,11 +419,17 @@ initialize() {
 # Main menu
 show_menu() {
     clear
-    print_ascii_header
-    print_header "PeerYeeter - Main Menu"
-    echo "Config: $CJDNS_CONFIG"
-    echo "Backup: $BACKUP_DIR"
-    echo -e "${GRAY}------------------------------------------------------------${NC}"
+    # Integrated ASCII art header
+    echo
+    echo -e "${CYAN}${BOLD}============================================================${NC}"
+    echo -e "${BLUE}                 (╯°□°)╯︵  P E E R S${NC}"
+    echo -e "${CYAN}-------------------${NC}${BLUE}└──CJDNS─PeerYeeter──┘${NC}${CYAN}-------------------${NC}"
+    echo -e "${CYAN}${BOLD}Main Menu${NC}"
+    echo -e "${CYAN}${BOLD}============================================================${NC}"
+    echo
+    echo -e "${YELLOW}Config: $CJDNS_CONFIG${NC}"
+    echo -e "${YELLOW}Backup: $BACKUP_DIR${NC}"
+    echo -e "${CYAN}------------------------------------------------------------${NC}"
     echo
 
     # CJDNS Peer Options section
@@ -431,10 +437,8 @@ show_menu() {
     echo
     echo "  1) 📊 View Peer Status"
     echo -e "     ${GRAY}└─ Current peer connections and health${NC}"
-    echo
     echo -e "  2) ⚡ ${ITALIC}Temporary${NC} Peer Functions"
     echo -e "     ${GRAY}└─ View status & disconnect, add wizard (runtime)${NC}"
-    echo
     echo -e "  3) 💾 ${ITALIC}Permanent${NC} Peer Functions ${ITALIC}(requires CJDNS ${BOLD_RED}restart${NC}${ITALIC})${NC}"
     echo -e "     ${GRAY}└─ View status & remove, add wizard (config)${NC}"
     echo
@@ -442,9 +446,8 @@ show_menu() {
     # Config File Options section
     echo -e "${LIGHT_BLUE}${BOLD}${UNDERLINE}Config File Options:${NC}"
     echo
-    echo -e "  4) ✏️  Edit Configuration File ${ITALIC}(requires CJDNS ${BOLD_RED}restart${NC}${ITALIC})${NC}"
+    echo -e "  4) ✏️ Edit Configuration File ${ITALIC}(requires CJDNS ${BOLD_RED}restart${NC}${ITALIC})${NC}"
     echo -e "     ${GRAY}└─ Add/edit/view peers, public peering, passwords, admin settings${NC}"
-    echo
     echo "  5) 📁 Configuration File Management"
     echo -e "     ${GRAY}└─ Backup/restore config, import/export peers, manage backups${NC}"
     echo
@@ -454,22 +457,16 @@ show_menu() {
     echo
     echo "  6) 🔍 Test Discovery & Preview Peers"
     echo -e "     ${GRAY}└─ Update address database and test discovery without changes${NC}"
-    echo
     echo "  7) ⚙️  Peer Yeeter Settings"
     echo -e "     ${GRAY}└─ Program settings, online sources, local database management${NC}"
     echo
 
-    # Restart CJDNS Service section
-    echo -e "${LIGHT_BLUE}${BOLD}${UNDERLINE}Service:${NC}"
+    # Services/Quit section
+    echo -e "${LIGHT_BLUE}${BOLD}${UNDERLINE}Services/Quit:${NC}"
     echo
     echo "  8) 🔄 Restart CJDNS Service"
     echo -e "     ${GRAY}└─ If configured, restart the local CJDNS service${NC}"
-    echo
-
-    # Exit
-    echo -e "${LIGHT_BLUE}${BOLD}${UNDERLINE}Exit:${NC}"
-    echo
-    echo -e "  ${PINK}0) Exit${NC}"
+    echo -e "  ${PINK}0) Exit Peer Yeeter!${NC}"
     echo
 }
 
