@@ -423,25 +423,26 @@ show_menu() {
     print_header "PeerYeeter - Main Menu"
     echo "Config: $CJDNS_CONFIG"
     echo "Backup: $BACKUP_DIR"
+    echo -e "${GRAY}------------------------------------------------------------${NC}"
     echo
 
     # CJDNS Peer Options section
-    echo -e "${BOLD}${WHITE}CJDNS Peer Options:${NC}"
+    echo -e "${LIGHT_BLUE}${BOLD}${UNDERLINE}CJDNS Peer Options:${NC}"
     echo
     echo "  1) 📊 View Peer Status"
     echo -e "     ${GRAY}└─ Current peer connections and health${NC}"
     echo
-    echo "  2) ⚡ Temporary Peer Functions"
+    echo -e "  2) ⚡ ${ITALIC}Temporary${NC} Peer Functions"
     echo -e "     ${GRAY}└─ View status & disconnect, add wizard (runtime)${NC}"
     echo
-    echo "  3) 💾 Permanent Peer Functions ${YELLOW}(requires CJDNS restart)${NC}"
+    echo -e "  3) 💾 ${ITALIC}Permanent${NC} Peer Functions ${ITALIC}(requires CJDNS ${BOLD_RED}restart${NC}${ITALIC})${NC}"
     echo -e "     ${GRAY}└─ View status & remove, add wizard (config)${NC}"
     echo
 
     # Config File Options section
-    echo -e "${BOLD}${WHITE}Config File Options:${NC}"
+    echo -e "${LIGHT_BLUE}${BOLD}${UNDERLINE}Config File Options:${NC}"
     echo
-    echo "  4) ✏️  Edit Configuration File ${YELLOW}(requires CJDNS restart)${NC}"
+    echo -e "  4) ✏️  Edit Configuration File ${ITALIC}(requires CJDNS ${BOLD_RED}restart${NC}${ITALIC})${NC}"
     echo -e "     ${GRAY}└─ Add/edit/view peers, public peering, passwords, admin settings${NC}"
     echo
     echo "  5) 📁 Configuration File Management"
@@ -449,7 +450,7 @@ show_menu() {
     echo
 
     # Peer Yeeter Program Settings section
-    echo -e "${BOLD}${WHITE}Peer Yeeter Program Settings:${NC}"
+    echo -e "${LIGHT_BLUE}${BOLD}${UNDERLINE}Peer Yeeter Program Settings:${NC}"
     echo
     echo "  6) 🔍 Test Discovery & Preview Peers"
     echo -e "     ${GRAY}└─ Update address database and test discovery without changes${NC}"
@@ -459,16 +460,16 @@ show_menu() {
     echo
 
     # Restart CJDNS Service section
-    echo -e "${BOLD}${WHITE}Service:${NC}"
+    echo -e "${LIGHT_BLUE}${BOLD}${UNDERLINE}Service:${NC}"
     echo
     echo "  8) 🔄 Restart CJDNS Service"
-    echo -e "     ${GRAY}└─ Restart the local CJDNS service${NC}"
+    echo -e "     ${GRAY}└─ If configured, restart the local CJDNS service${NC}"
     echo
 
     # Exit
-    echo -e "${BOLD}${WHITE}Exit:${NC}"
+    echo -e "${LIGHT_BLUE}${BOLD}${UNDERLINE}Exit:${NC}"
     echo
-    echo "  0) Exit"
+    echo -e "  ${PINK}0) Exit${NC}"
     echo
 }
 
@@ -482,7 +483,7 @@ temporary_peer_menu() {
         echo -e "${GRAY}These changes take effect immediately but are lost on CJDNS restart.${NC}"
         echo
 
-        echo "  1) 🔌 View Status & Disconnect Peers"
+        echo "  1) 🔌 View Status & Disconnect Peers (Runtime)"
         echo -e "     ${GRAY}└─ View current runtime peers and disconnect selected ones${NC}"
         echo
         echo "  2) ⚡ Peer Adding Wizard (Runtime)"
@@ -513,7 +514,7 @@ permanent_peer_menu() {
         echo -e "${YELLOW}These changes modify the config file and require a CJDNS restart.${NC}"
         echo
 
-        echo "  1) 🗑️  View Status & Remove Peers"
+        echo "  1) 🗑️  View Status & Remove Peers (Config)"
         echo -e "     ${GRAY}└─ View config peers and remove selected ones permanently${NC}"
         echo
         echo "  2) 🧙 Peer Adding Wizard (Config)"
@@ -2314,10 +2315,7 @@ view_peer_status() {
     # Count config vs DNS-discovered peers
     local config_peers=$(grep -c "|config$" "$peer_states" 2>/dev/null || echo 0)
     local dns_peers=$(grep -c "|dns$" "$peer_states" 2>/dev/null || echo 0)
-    local unresponsive_config=$(count_unresponsive_config_peers "$peer_states")
-    local unresponsive_dns=$((unresponsive - unresponsive_config))
-
-    # Ensure numeric values
+    # Ensure numeric values first (before arithmetic operations)
     total=${total//[^0-9]/}
     established=${established//[^0-9]/}
     unresponsive=${unresponsive//[^0-9]/}
@@ -2328,6 +2326,13 @@ view_peer_status() {
     [ -z "$unresponsive" ] && unresponsive=0
     [ -z "$config_peers" ] && config_peers=0
     [ -z "$dns_peers" ] && dns_peers=0
+
+    # Count unresponsive by source (after sanitization)
+    local unresponsive_config=$(count_unresponsive_config_peers "$peer_states")
+    unresponsive_config=${unresponsive_config//[^0-9]/}
+    [ -z "$unresponsive_config" ] && unresponsive_config=0
+    local unresponsive_dns=$((unresponsive - unresponsive_config))
+    [ "$unresponsive_dns" -lt 0 ] && unresponsive_dns=0
     local other=$((total - established - unresponsive))
 
     echo "Total peers: $total ($config_peers from config, $dns_peers DNS-discovered)"
@@ -3286,12 +3291,12 @@ restore_config_menu() {
 
 # Restart cjdns service
 restart_service() {
-    print_subheader "Restarting cjdns Service"
+    print_subheader "Restart CJDNS Service"
 
     if [ -z "$CJDNS_SERVICE" ]; then
         print_error "Service management unavailable"
         echo
-        echo "Restart function is unavailable because no service was found during initialization."
+        echo "Restart function is unavailable because no service was configured during initialization."
         echo "Please restart cjdns manually using one of these methods:"
         echo "  - sudo systemctl restart cjdns.service"
         echo "  - sudo systemctl restart cjdroute"
@@ -3300,6 +3305,18 @@ restart_service() {
         read -p "Press Enter to continue..."
         return 1
     fi
+
+    echo "Service: $CJDNS_SERVICE"
+    echo
+    print_warning "This will restart the CJDNS service, briefly disconnecting all peers."
+    echo
+    if ! ask_yes_no "Are you sure you want to restart CJDNS?"; then
+        print_info "Restart cancelled"
+        echo
+        read -p "Press Enter to continue..."
+        return 0
+    fi
+    echo
 
     echo "Restarting $CJDNS_SERVICE..."
 

@@ -3,17 +3,22 @@
 
 # Color codes - improved for better readability
 RED='\033[0;31m'
+BOLD_RED='\033[1;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 ORANGE='\033[38;5;208m'  # Orange for IPv6
 BLUE='\033[1;34m'        # Brighter blue for better readability
 CYAN='\033[1;36m'        # Brighter cyan for headers
+LIGHT_BLUE='\033[38;5;117m'  # Light blue for section headers
 MAGENTA='\033[0;35m'
+PINK='\033[38;5;213m'    # Pink for exit option
 WHITE='\033[1;37m'       # Bright white
 GRAY='\033[0;90m'        # Gray for secondary info
 NC='\033[0m'             # No Color
 BOLD='\033[1m'
 DIM='\033[2m'
+ITALIC='\033[3m'
+UNDERLINE='\033[4m'
 
 # ASCII Art Header
 print_ascii_header() {
@@ -86,9 +91,9 @@ ask_yes_no_default() {
     local hint
 
     if [ "$default" = "y" ] || [ "$default" = "Y" ]; then
-        hint="Y/n"
+        hint="Y/n, default=y"
     else
-        hint="y/N"
+        hint="y/N, default=n"
     fi
 
     while true; do
@@ -171,14 +176,14 @@ ask_input() {
     fi
 }
 
-# Print section header
+# Print section header (light blue/cyan borders like the ascii header)
 print_header() {
     local title="$1"
     local width=60
     echo
-    echo -e "${WHITE}$(printf '=%.0s' $(seq 1 $width))${NC}"
-    echo -e "${WHITE}${BOLD}$title${NC}"
-    echo -e "${WHITE}$(printf '=%.0s' $(seq 1 $width))${NC}"
+    echo -e "${CYAN}${BOLD}$(printf '=%.0s' $(seq 1 $width))${NC}"
+    echo -e "${CYAN}${BOLD}$title${NC}"
+    echo -e "${CYAN}${BOLD}$(printf '=%.0s' $(seq 1 $width))${NC}"
     echo
 }
 
