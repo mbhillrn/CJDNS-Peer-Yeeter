@@ -24,17 +24,14 @@ sudo apt-get install jq git wget curl sqlite3
 
 You need cjdnstool to communicate with your cjdns instance:
 
-**Recommended - Node.js version (full features):**
+**Recommended - Node.js version (If not installed, will ask first run):**
 ```bash
 sudo npm install -g cjdnstool
 ```
-
-**Alternative - Rust version (limited functionality):**
-- https://github.com/cjdelisle/cjdnstool-rs
-
+**May also work fine with the rust version. Did some limited testing.**
 ### gum (Required for Interactive UI)
 
-The tool will offer to install gum automatically on first run, or install manually:
+The tool will offer to install gum automatically (recommended) on first run, or install manually:
 
 ```bash
 sudo mkdir -p /etc/apt/keyrings
@@ -43,10 +40,7 @@ echo "deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *
 sudo apt update && sudo apt install gum
 ```
 
-### Optional Tools
-
-These enhance the experience but aren't required:
-
+### Other Tools
 - **fx** - Interactive JSON viewer/editor with mouse support (`sudo snap install fx`)
 - **fzf** - Fuzzy finder for file selection (`sudo apt install fzf`)
 
