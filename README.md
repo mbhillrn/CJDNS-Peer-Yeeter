@@ -31,14 +31,7 @@ sudo npm install -g cjdnstool
 **May also work fine with the rust version. Did some limited testing.**
 ### gum (Required for Interactive UI)
 
-The tool will offer to install gum automatically (recommended) on first run, or install manually:
-
-```bash
-sudo mkdir -p /etc/apt/keyrings
-curl -fsSL https://repo.charm.sh/apt/gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/charm.gpg
-echo "deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *" | sudo tee /etc/apt/sources.list.d/charm.list
-sudo apt update && sudo apt install gum
-```
+The tool will offer to install gum automatically on first run, or just install manually if you want.
 
 ### Other Tools
 - **fx** - Interactive JSON viewer/editor with mouse support (`sudo snap install fx`)
