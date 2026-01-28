@@ -102,7 +102,7 @@ update_from_github() {
 
     local repo_dir="$temp_dir/$name"
 
-    if ! git clone --depth 1 --quiet "$url" "$repo_dir" 2>/dev/null; then
+    if ! timeout 30 git clone --depth 1 --quiet "$url" "$repo_dir" 2>/dev/null; then
         print_warning "Failed to clone $name" >&2
         return 1
     fi
@@ -146,7 +146,7 @@ update_from_json() {
 
     local temp_file=$(mktemp)
 
-    if ! wget -q -O "$temp_file" "$url" 2>/dev/null; then
+    if ! wget -q -T 15 -O "$temp_file" "$url" 2>/dev/null; then
         rm -f "$temp_file"
         return 1
     fi

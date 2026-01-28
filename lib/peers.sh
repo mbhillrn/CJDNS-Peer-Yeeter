@@ -25,7 +25,7 @@ discover_peers_from_github() {
 
         print_info "Fetching $repo_name..."
 
-        if ! git clone --depth 1 --quiet "$repo_url" "$repo_dir" 2>/dev/null; then
+        if ! timeout 30 git clone --depth 1 --quiet "$repo_url" "$repo_dir" 2>/dev/null; then
             print_warning "Failed to clone $repo_url (repo may be down or unreachable)"
             continue
         fi
@@ -102,7 +102,7 @@ discover_peers_from_kaotisk() {
     print_info "Fetching peers from kaotisk-hund..."
 
     local temp_file=$(mktemp)
-    if ! wget -q -O "$temp_file" "$url" 2>/dev/null; then
+    if ! wget -q -T 15 -O "$temp_file" "$url" 2>/dev/null; then
         print_warning "Failed to fetch from kaotisk-hund (source may be down)"
         rm -f "$temp_file"
         return 1
