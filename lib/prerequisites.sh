@@ -62,7 +62,7 @@ install_gum() {
     return 0
 }
 
-# Check if fzf is installed (optional)
+# Check if fzf is installed
 check_fzf() {
     if command -v fzf &>/dev/null; then
         return 0
@@ -90,7 +90,7 @@ install_fzf() {
     fi
 }
 
-# Check if fx is installed (optional but recommended for JSON editing)
+# Check if fx is installed
 check_fx() {
     if command -v fx &>/dev/null; then
         return 0
@@ -172,20 +172,20 @@ install_fx() {
 # Check all prerequisites
 check_prerequisites() {
     local missing_tools=()
-    local optional_missing=()
+    local additional_missing=()
 
     # Check required tools
     if ! check_gum; then
         missing_tools+=("gum")
     fi
 
-    # Check optional tools
+    # Check additional tools needed for full functionality
     if ! check_fzf; then
-        optional_missing+=("fzf")
+        additional_missing+=("fzf")
     fi
 
     if ! check_fx; then
-        optional_missing+=("fx")
+        additional_missing+=("fx")
     fi
 
     if [ ${#missing_tools[@]} -gt 0 ]; then
@@ -218,10 +218,10 @@ check_prerequisites() {
         fi
     fi
 
-    # Inform about optional tools and offer installation
-    if [ ${#optional_missing[@]} -gt 0 ]; then
+    # Inform about additional tools and offer installation
+    if [ ${#additional_missing[@]} -gt 0 ]; then
         echo
-        print_info "Optional tools not installed: ${optional_missing[*]}"
+        print_info "Additional tools needed for full functionality: ${additional_missing[*]}"
         echo
         print_info "fx: Interactive JSON viewer/editor with mouse support"
         print_info "fzf: Fuzzy finder for enhanced file selection"
