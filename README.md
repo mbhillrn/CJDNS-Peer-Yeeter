@@ -1,19 +1,20 @@
 # CJDNS Peer Yeeter
 
-A powerful interactive tool for managing CJDNS peers. Automatically discovers peers from multiple sources, tests connectivity, tracks peer quality over time, and safely manages your cjdns configuration.
+Interactive program which provides a user-friendly interaction with cjdnstool. Yeet, add, view, and manage peers with ease! Simplifies configuration options and more. Features an automatically updated database of public CJDNS nodes, which tracks peer connectivity and quality over time.
 
-## What It Does
+## Features
 
-- **Discovers peers** from GitHub repositories and public peer lists
-- **Tests connectivity** before adding peers to your config
-- **Tracks peer quality** with a SQLite database (quality scores, uptime history)
-- **Manages both IPv4 and IPv6** peers with automatic interface detection
-- **Creates automatic backups** before any config changes
-- **Provides an interactive menu** with gum-based UI for easy peer selection
+- **Discover peers** from GitHub repositories and public peer lists
+- **Test connectivity** before adding peers to your config
+- **Track peer quality** with SQLite database (quality scores, uptime history)
+- **Manage both IPv4 and IPv6** peers with automatic interface detection
+- **Runtime vs Permanent** peer management (test peers without modifying config)
+- **Create automatic backups** before any config changes
+- **Interactive menus** with gum-based UI for easy peer selection
 
-## Requirements
+## Prerequisites
 
-### System Dependencies
+### Required System Tools
 
 ```bash
 sudo apt-get install jq git wget curl sqlite3
@@ -22,9 +23,16 @@ sudo apt-get install jq git wget curl sqlite3
 ### cjdnstool (Required)
 
 You need cjdnstool to communicate with your cjdns instance:
-- https://github.com/furetosan/cjdnstool
 
-### gum (Required - Interactive UI)
+**Recommended - Node.js version (full features):**
+```bash
+sudo npm install -g cjdnstool
+```
+
+**Alternative - Rust version (limited functionality):**
+- https://github.com/cjdelisle/cjdnstool-rs
+
+### gum (Required for Interactive UI)
 
 The tool will offer to install gum automatically on first run, or install manually:
 
@@ -39,8 +47,8 @@ sudo apt update && sudo apt install gum
 
 These enhance the experience but aren't required:
 
-- **fx** - Interactive JSON viewer/editor with mouse support (install via `sudo snap install fx`)
-- **fzf** - Fuzzy finder for file selection (install via `sudo apt install fzf`)
+- **fx** - Interactive JSON viewer/editor with mouse support (`sudo snap install fx`)
+- **fzf** - Fuzzy finder for file selection (`sudo apt install fzf`)
 
 ## Installation
 
@@ -50,73 +58,114 @@ cd ~/c-peeryeeter
 sudo ./peeryeeter.sh
 ```
 
-## Usage
+## Quick Start
 
-Run with sudo (required for config access and service management):
+### What Happens on Startup
 
-```bash
-sudo ./peeryeeter.sh
+When you run `sudo ./peeryeeter.sh`, the program automatically:
+
+1. **Checks prerequisites** - Verifies jq, git, wget, sqlite3, gum are installed
+2. **Detects cjdnstool** - Finds and validates your cjdnstool installation
+3. **Finds your CJDNS config** - Scans systemd services for cjdns and locates config file
+4. **Extracts admin credentials** - Gets admin.bind and admin.password from config
+5. **Locates cjdroute binary** - Finds the binary for config validation
+6. **Validates your config** - Checks JSON structure and runs `cjdroute --check`
+7. **Tests admin connection** - Confirms communication with running CJDNS instance
+8. **Initializes database** - Sets up SQLite peer tracking database and downloads peer lists
+
+No manual configuration needed - everything is auto-detected!
+
+### Main Menu Overview
+
+```
+CJDNS Peer Options:
+  1) View Peer Status
+     └─ Current peer connections and health from running cjdns
+
+  2) Temporary Peer Functions (Runtime - no restart needed)
+     └─ Add peers temporarily or disconnect running peers
+
+  3) Permanent Peer Functions (Config - requires restart)
+     └─ Add/remove peers permanently to config file
+
+Config File Options:
+  4) Edit Configuration File
+     └─ Interactive JSON editor for all config sections
+
+  5) Configuration File Management
+     └─ Backup/restore, import/export, manage backups
+
+Peer Yeeter Program Settings:
+  6) Test Discovery & Preview Peers
+     └─ Update local database and preview available peers
+
+  7) Peer Yeeter Settings
+     └─ Program configuration, peer sources, database management
+
+Services/Quit:
+  8) Restart CJDNS Service
+     └─ Restart cjdns to apply config changes
+
+  0) Exit Peer Yeeter!
 ```
 
-### Main Menu
+### Submenu Details
 
-```
-1) Peer Adding Wizard (Recommended)
-   Complete guided workflow: select protocols, discover peers,
-   test connectivity, preview changes, and apply.
+**Option 2 - Temporary Peer Functions:**
+- View Status & Disconnect Peers (real-time management via cjdnstool)
+- Peer Adding Wizard (add peers without config modification)
 
-2) Discover & Preview Peers
-   Fetch peers from all sources and see what's available.
+**Option 3 - Permanent Peer Functions:**
+- View Status & Remove Peers (interactive removal with quality metrics)
+- Peer Adding Wizard (full workflow: discover, test, preview, apply to config)
 
-3) Edit Config File
-   Interactive JSON editor with validation.
+**Option 5 - Configuration File Management:**
+- View Current Config
+- Edit with gum or Text Editor (micro/nano/vim/vi)
+- Manage Backups (list, restore, delete)
+- Cleanup/Normalize Config (remove extra metadata)
+- Import/Export Peers
 
-4) View Status & Remove Peers
-   See all peers with quality scores, select and remove bad ones.
+**Option 7 - Peer Yeeter Settings:**
+- Program Settings (config path, service name, backup directory)
+- Online Sources Management (enable/disable peer sources)
+- Local Address Database Management (backup/restore/reset)
 
-5) View Peer Status
-   Real-time peer statistics from cjdns.
+### Recommended Workflows
 
-6) Maintenance & Settings
-   Config normalization, backup management, database tools,
-   restart cjdns service.
-```
-
-### Recommended Workflow
-
-**Adding new peers:**
+**Adding new peers permanently:**
 1. Run `sudo ./peeryeeter.sh`
-2. Select **Peer Adding Wizard** (option 1)
-3. Choose IPv4, IPv6, or both
-4. Let it discover and test peers
-5. Review and apply changes
+2. Select **Permanent Peer Functions** (option 3)
+3. Choose **Peer Adding Wizard**
+4. Select IPv4, IPv6, or both
+5. Let it discover and optionally test peers
+6. Review and apply changes
+7. Restart CJDNS when prompted
+
+**Testing peers before committing:**
+1. Select **Temporary Peer Functions** (option 2)
+2. Choose **Peer Adding Wizard**
+3. Add peers to running instance (no config changes)
+4. Monitor with **View Peer Status** (option 1)
+5. If happy, add permanently via option 3
 
 **Cleaning up bad peers:**
-1. Run `sudo ./peeryeeter.sh`
-2. Select **View Status & Remove Peers** (option 4)
-3. Use the interactive selector to pick unresponsive peers
+1. Select **Permanent Peer Functions** (option 3)
+2. Choose **View Status & Remove Peers**
+3. Use interactive selector to pick unresponsive peers
 4. Confirm removal
 
 ## How It Works
 
-### Auto-Detection
-
-On startup, the tool automatically:
-1. Scans systemd services for cjdns
-2. Finds your config file location
-3. Extracts admin connection info
-4. Tests connection to cjdns
-5. Locates your cjdroute binary
-
-No manual configuration needed.
-
 ### Peer Sources
 
-Discovers peers from:
+Discovers peers from multiple configurable sources:
 - `hyperboria/peers` (GitHub)
 - `yangm97/peers` (GitHub)
 - `cwinfo/hyperboria-peers` (GitHub)
 - `kaotisk-hund` JSON peer list
+
+Manage sources via **Peer Yeeter Settings** > **Online Sources Management**.
 
 ### Peer Quality Tracking
 
@@ -124,13 +173,15 @@ The SQLite database tracks:
 - Connection state (ESTABLISHED/UNRESPONSIVE)
 - First and last seen timestamps
 - Quality score (0-100% based on uptime)
-- Total check count
+- Consecutive checks in current state
+
+Peers are sorted by quality when displayed, helping you identify reliable nodes.
 
 ### Safe Config Handling
 
 - Creates timestamped backups before every change
 - Validates JSON syntax
-- Validates with cjdroute --check
+- Validates with `cjdroute --check`
 - Only writes required fields (password, publicKey)
 - Strips unnecessary metadata from peer entries
 
@@ -141,8 +192,8 @@ The SQLite database tracks:
 ├── master_peer_list.json      # Cached discovered peers
 ├── peer_sources.json          # Configurable peer sources
 ├── peer_tracking.db           # SQLite quality database
-├── cjdroute_backup_*.conf     # Config backups
-└── database_backups/          # Database backups
+├── cjdroute_backup_*.conf     # Config backups (timestamped)
+└── database_backups/          # Database snapshots
 ```
 
 ## Project Structure
@@ -151,7 +202,7 @@ The SQLite database tracks:
 CJDNS-Peer-Yeeter/
 ├── peeryeeter.sh          # Main script
 ├── lib/
-│   ├── ui.sh              # Colors, prompts, formatting
+│   ├── ui.sh              # Colors, prompts, formatting, ASCII art
 │   ├── detect.sh          # Auto-detection logic
 │   ├── peers.sh           # Peer discovery and testing
 │   ├── config.sh          # Config file management
@@ -159,42 +210,12 @@ CJDNS-Peer-Yeeter/
 │   ├── master_list.sh     # Peer cache management
 │   ├── interactive.sh     # Gum-based menus
 │   ├── editor.sh          # JSON editor
-│   ├── guided_editor.sh   # Smart guided editor
+│   ├── guided_editor.sh   # Smart guided peer editor
 │   └── prerequisites.sh   # Dependency installation
 ├── README.md
 └── LICENSE
 ```
 
-## Troubleshooting
-
-### "cjdnstool not found"
-
-Install from: https://github.com/furetosan/cjdnstool
-
-### "Cannot connect to cjdns admin interface"
-
-Check if cjdns is running:
-```bash
-sudo systemctl status cjdroute
-```
-
-### "Config validation failed"
-
-Your original config is safe (backup was created). Check the error message for details.
-
-### "Failed to clone repository"
-
-Some peer sources may be temporarily unavailable. The tool continues with working sources.
-
 ## License
 
 MIT License - see [LICENSE](LICENSE)
-
----
-
-## Support
-
-If you find this tool useful, support is appreciated:
-
-**Bitcoin:** `bc1qy63057zemrskq0n02avq9egce4cpuuenm5ztf5`
-
