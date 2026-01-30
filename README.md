@@ -2,6 +2,8 @@
 
 Interactive program which provides a user-friendly interaction with cjdnstool. Yeet, add, view, and manage peers with ease! Simplifies configuration options and more. Features an automatically updated database of public CJDNS nodes, which tracks peer connectivity and quality over time.
 
+Support (bitcoin): bc1qy63057zemrskq0n02avq9egce4cpuuenm5ztf5
+
 ## Features
 
 - **Discover peers** from GitHub repositories and public peer lists
